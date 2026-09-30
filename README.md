@@ -1,6 +1,49 @@
-# ChatGPT Exporter — English Autopilot 2.3.4 (Microsoft Edge)
+# ChatGPT Exporter — English Autopilot 2.3.5 (Microsoft Edge)
 
 This is a personal-use Edge/Chromium extension for building a durable local backup of the conversations exposed to your signed-in ChatGPT web session. Version 2.3.4 is an in-place upgrade from 2.2/2.3/2.3.1: it deliberately keeps the IndexedDB database name `english-autopilot-v2`, so replacing the files in the same unpacked-extension folder and pressing **Reload** at `edge://extensions` preserves the existing queue/cache when Edge keeps the same extension identity.
+
+Version 2.3.5. Read [the update notes](CHANGELOG-v2.3.5.md) for the stuck-chat and attachment integrity fixes.
+
+For an existing installation, stop the run, replace files inside the same extension folder, reload the extension at `edge://extensions`, and reopen the exporter. The same extension identity retains queue, cache, discovery cursors and folder handles. Choose Start / resume. Importing or rescanning everything is unnecessary when that state is still present.
+
+For first installation, extract this folder to a permanent location, enable Developer mode at `edge://extensions`, and choose Load unpacked on the folder containing `manifest.json`. Open the extension dashboard, connect to the intended signed-in ChatGPT account/workspace, and choose your backup folder. Select an indexing/download mode and start. Keep Edge, the exporter dashboard and its ChatGPT tab open, and the computer awake.
+
+Chats are saved as full JSON plus selected-branch Markdown. The backup also stores a conversation index, progress report and portable queue state. Eligible document/code/text attachments up to 10 MB are saved separately. Choose an existing-files folder to reuse locally available originals by filename and size. Error responses are not successful attachment downloads.
+
+Rate limits retain progress and server cooldowns. File-specific failures yield to other items; account, browser-check, folder-permission or quota problems require attention. An unavailable attachment remains listed in the progress report. Private website endpoints may change, and the exporter cannot reconstruct deleted/unavailable server data.
+
+Portable state can be imported after connecting and choosing the existing backup folder in another installation. It preserves IDs, statuses and discovery cursors; locally available JSON avoids repeat downloads. Keep original backups before uninstalling the extension or clearing browser data.
+
+Use Stop run to checkpoint, Hold in place to temporarily hold the current engine, and Start / resume to continue. Scan now checks for new/changed chats. Passive watcher settings control periodic rescanning and whether network work yields while you use ChatGPT. See the included historical change notes and third-party notices for additional behavior and attribution.
+
+
+# v2.3.5 — queue progress and attachment integrity
+
+Updated September 30, 2026.
+
+- A successful conversation read retains the newer list timestamp and records the timestamp it checked. An older detail response cannot repeatedly requeue the same chat. A genuinely newer list timestamp still queues an update.
+- Cached changed-body observations are handled once. Older passive payloads cannot replace a newer cached conversation.
+- A file-specific write failure defers that chat and lets other chats continue. After three failed attempts it is reported as failed. Retrieved chat data stays cached, so retrying its write does not repeat the conversation download. Folder access, security, and quota failures still stop for attention because they affect the whole backup.
+- Network failures, including responses without a status, have a bounded three-attempt request budget before deferral. Attachment download-link cycles and excessive redirects are rejected. Attachment routes have a shared 60-second budget, bridge calls have a 100-second timeout, and local file writes have a 90-second timeout with an attempted abort.
+- HTTP-200 attachment error envelopes, including `GetDownloadLinkError/file_not_found`, are rejected rather than saved as document bytes. Chunk transfer must advance and finish at the declared length. Known original file sizes are checked before saving.
+- Tiny previously saved attachment files are revalidated on upgrade. Local attachment matching excludes known service-error envelopes. Existing saved files are checked before their saved status is reused. Original suspect files remain on disk for inspection; an unavailable original is reported honestly.
+- Fixed a missing `safeName` import that could defer otherwise successful attachment downloads.
+- Completion text includes unavailable/deferred attachment counts.
+
+Validation: eight focused tests passed, including a failed-write queue yielding to another chat, bounded status-zero retries, stale timestamp deduplication, repeat-observation suppression, real bridge error-envelope rejection, circular-link rejection, and valid document chunking. A real Edge 154.0.4258.37 extension test in an isolated profile verified transcript writes, a real fixture attachment, rejection of a missing-file response, and rescan without a repeated conversation download. Website responses were mocked. Your live account and original attachment availability were not tested.
+
+## Updating while keeping progress
+
+Stop the current run. Replace files inside the same installed extension folder, then reload its card at `edge://extensions` and reopen its dashboard. Keep the same extension folder so the database identity, queue and cache remain available. Start/resume uses existing discovery cursors and saved files; a full scan is not required to install this fix.
+
+For recovery in another installation, connect to the same account/workspace, choose the existing backup folder, then import `portable-state.json`. The portable queue retains known links and statuses; conversation JSON in the backup folder provides the locally reusable bodies. No reset or deletion of the old backup is needed.
+
+## Why tiny attachment files are invalid
+
+The supplied `attachments.zip` contained 236 file entries: 235 were exactly 105 bytes containing a JSON `file_not_found` service error, and one was a 79,182-byte Markdown file. Windows may display each tiny file as 1 KB after rounding. Those error entries do not contain the original uploaded documents. This update prevents that false success and allows valid original files in a selected local file library to be reused. It cannot reconstruct documents that ChatGPT no longer serves and that are absent locally.
+
+The attachment scope remains eligible text, document and code files up to 10 MB. Existing media/type exclusions remain in place.
+
 
 ## What v2.3/2.3.1/2.3.4 adds
 
