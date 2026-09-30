@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Exporter \u2014 English Autopilot",
+  "version": "2.3.4",
+  "description": "Revision-aware resumable ChatGPT backup with portable state, local-first attachment reuse, passive rescans and adaptive pacing.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "scripting",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open ChatGPT Exporter"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
