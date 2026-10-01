@@ -1,5 +1,6 @@
-chrome.runtime.onInstalled.addListener(()=>chrome.alarms.create('english-exporter-passive-tick',{periodInMinutes:15}));
-chrome.runtime.onStartup.addListener(()=>chrome.alarms.create('english-exporter-passive-tick',{periodInMinutes:15}));
+chrome.alarms.create('english-exporter-passive-tick',{periodInMinutes:1});
+chrome.runtime.onInstalled.addListener(()=>chrome.alarms.create('english-exporter-passive-tick',{periodInMinutes:1}));
+chrome.runtime.onStartup.addListener(()=>chrome.alarms.create('english-exporter-passive-tick',{periodInMinutes:1}));
 chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name==='english-exporter-passive-tick')chrome.runtime.sendMessage({type:'passive-tick',at:Date.now()}).catch(()=>{});});
 chrome.action.onClicked.addListener(async () => {
   const url = chrome.runtime.getURL('exporter.html');const tabs = await chrome.tabs.query({url});

@@ -1,208 +1,97 @@
-# ChatGPT Exporter — English Autopilot 2.3.6 (Microsoft Edge)
+# ChatGPT Exporter — English Autopilot for Microsoft Edge
 
-This is a personal-use Edge/Chromium extension for building a durable local backup of the conversations exposed to your signed-in ChatGPT web session. Version 2.3.4 is an in-place upgrade from 2.2/2.3/2.3.1: it deliberately keeps the IndexedDB database name `english-autopilot-v2`, so replacing the files in the same unpacked-extension folder and pressing **Reload** at `edge://extensions` preserves the existing queue/cache when Edge keeps the same extension identity.
+**Version 2.3.8 · October 1, 2026**
 
-# v2.3.6 — resume passive watching after available work finishes
+Build a local backup of the conversations available to your signed-in ChatGPT web session. The extension discovers active, archived and project chats, writes conversation JSON and readable Markdown, tracks revisions, and backs up eligible attachments. Your backup stays in the folder you select.
 
-- Start enters a distinct **Passive watch active** state when discovery is done and no eligible work remains. Unresolved chats remain visible and parked; they do not prevent watching.
-- Normal export completion returns to watching when Passive watcher is enabled. The job records the previous run outcome separately, so watching does not claim unresolved chats were saved.
-- The dashboard shows the next scan in minutes, enables **Stop passive watch**, and identifies the watcher as active. Start does not rerun local reconciliation over and over when only parked failures remain.
-- Stop suspends both active export and automatic watcher wakeups. Start reactivates watching. Held active work retains its separate Hold in place behavior.
-- A watching job reconnects to the same account/workspace after dashboard reload, honoring a saved cooldown before reconnection.
-- The watcher wakes for new links, newer list metadata, genuinely changed bodies, or due queued work. Already handled body observations and future retries do not repeatedly launch the engine. The periodic full scan remains on the selected schedule.
-- Updating a finished v2.3.5 job with passive watching enabled restores the watcher. Deliberately paused jobs remain stopped.
+[Download v2.3.8](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.3.8) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-Validation: five focused watcher-policy tests passed. An isolated Edge extension test confirmed watching with a parked failure, Stop preventing timer restart, Start resuming idle watching, reload reconnecting without another conversation download, and a new visible chat link automatically being downloaded before returning to watch. Website traffic was simulated and the test clock accelerated. The v2.3.5 attachment integrity and rescan checks also passed.
+## What changed in v2.3.8
+
+- **Automatic recent-chat discovery:** Passive watcher checks recent server metadata every five minutes by default. New chats and remote updates can be discovered without opening their links in the browser. Fifteen- and thirty-minute options are available.
+- **Reliable full-scan scheduling:** The selected two-, three-, six- or twelve-hour full traversal keeps its own deadline. Small export runs no longer keep postponing it.
+- **Completed reply detection:** Replies completed in observed ChatGPT tabs queue a refresh once, including when the conversation timestamp remains unchanged.
+- **Chat updates take priority:** Attachment downloads and waits yield to queued chat updates. Pending revisions survive reload and local reconciliation.
+- **Visible watcher health:** The dashboard shows observed tab count, last tab observation, last successful server check, next check, and network waits/errors. A one-minute extension alarm supplements its timers.
+- **Attachment fixes retained:** Context-aware download routes, validation of saved bytes, local original-file reuse, and explicit repair of earlier false downloads remain included.
+
+Detailed change notes are included as `CHANGELOG-v2.3.8.md` inside the extension folder.
+
+## Install in Edge
+
+1. Download **ChatGPT-Exporter-English-Edge-v2.3.8.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
+2. Extract the ZIP to a permanent folder. Inside it, find `ChatGPT-Exporter-English-Edge`, which contains `manifest.json`.
+3. Open `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
+4. Open the exporter dashboard from the extension. Connect to the intended signed-in ChatGPT account and workspace.
+5. Choose your backup folder, select the indexing/download mode and enabled discovery sources, then press **Start / resume**.
+6. Leave **Passive watcher** enabled to continue checking after available export work finishes.
+
+No developer tools or build step are required to install the packaged extension. The GitHub **Source code** archives contain the repository; select its `ChatGPT-Exporter-English-Edge` subfolder if installing from those archives.
 
 ## Update without resetting your backup
 
-Replace files inside the same installed extension folder, click Reload on its card at `edge://extensions`, and reopen the exporter. Keep the same installation path and browser profile to retain the queue, cache and cursors. Leave Passive watcher enabled. If it is paused, connect if needed and press Start / resume. No reset, reimport or full rescan is required for the watcher fix.
+1. Stop the current exporter run or passive watcher.
+2. Extract the new release and replace the files **inside the same installed unpacked-extension folder**.
+3. Click **Reload** on the existing extension card at `edge://extensions`.
+4. Reopen the dashboard. Connect to the same account/workspace if prompted, keep the same backup folder, retain Passive watcher, and press **Start / resume** if stopped.
 
-Keep Edge, the exporter dashboard and its connected ChatGPT tab open, with the computer awake. Passive watching cannot run while the browser is closed. Server limits and user-activity yielding still apply when new network work is required.
+Keep the same installation path and Edge profile to retain the extension identity, IndexedDB queue/cache, discovery cursors, cooldowns and directory handles. Avoid uninstalling or loading a second copy from a different path when preserving that state matters. A reset, reimport or full rescan is not required merely to install this update.
 
+## How Passive watcher works
 
-Version 2.3.5. Read [the update notes](CHANGELOG-v2.3.5.md) for the stuck-chat and attachment integrity fixes.
+Keep **Edge, the exporter dashboard and its connected signed-in ChatGPT tab open**, with the computer awake. The dashboard can remain in the background. Closing it, stopping the watcher, closing Edge, or putting the computer to sleep stops active processing.
 
-For an existing installation, stop the run, replace files inside the same extension folder, reload the extension at `edge://extensions`, and reopen the exporter. The same extension identity retains queue, cache, discovery cursors and folder handles. Choose Start / resume. Importing or rescanning everything is unnecessary when that state is still present.
+| Check | Default or options | Coverage |
+| --- | --- | --- |
+| Recent server metadata | 5 minutes; optional 15 or 30 minutes | First updated-order page of active chats, enabled archived chats, project previews, and one rotating known project |
+| Full traversal | Selected 2, 3, 6 or 12 hours | Enabled discovery sources beyond the recent pages |
+| Observed ChatGPT tabs | While connected | New links, changed loaded bodies and completed native replies |
+| Dashboard alarm | 1 minute | Nudges the open dashboard; it does not independently export chats |
 
-For first installation, extract this folder to a permanent location, enable Developer mode at `edge://extensions`, and choose Load unpacked on the folder containing `manifest.json`. Open the extension dashboard, connect to the intended signed-in ChatGPT account/workspace, and choose your backup folder. Select an indexing/download mode and start. Keep Edge, the exporter dashboard and its ChatGPT tab open, and the computer awake.
+Recent checks are bounded checks. The full traversal provides broader discovery coverage. The five-minute setting is a target interval: active streaming, enabled user-yield behavior, browser sleep and actual server cooldowns can delay network requests. User-yield waits for six quiet minutes before new network work. Fresh conversation bodies already captured from ChatGPT can be saved locally during a cooldown.
 
-Chats are saved as full JSON plus selected-branch Markdown. The backup also stores a conversation index, progress report and portable queue state. Eligible document/code/text attachments up to 10 MB are saved separately. Choose an existing-files folder to reuse locally available originals by filename and size. Error responses are not successful attachment downloads.
+Use the watcher health text to distinguish an active watcher from one waiting on network permission, user activity or rate limits. **Stop passive watch** suspends automatic wakeups; **Start / resume** reactivates them. **Scan now** requests a new discovery pass. Reopening an active saved watcher reconnects while preserving its queue and cooldown.
 
-Rate limits retain progress and server cooldowns. File-specific failures yield to other items; account, browser-check, folder-permission or quota problems require attention. An unavailable attachment remains listed in the progress report. Private website endpoints may change, and the exporter cannot reconstruct deleted/unavailable server data.
+## Repair tiny or missing attachments
 
-Portable state can be imported after connecting and choosing the existing backup folder in another installation. It preserves IDs, statuses and discovery cursors; locally available JSON avoids repeat downloads. Keep original backups before uninstalling the extension or clearing browser data.
+Windows may display a tiny service-error response as “1 KB.” A JSON response such as `GetDownloadLinkError/file_not_found` contains no original document bytes. The exporter validates downloads and saved files before counting them as successful attachments.
 
-Use Stop run to checkpoint, Hold in place to temporarily hold the current engine, and Start / resume to continue. Scan now checks for new/changed chats. Passive watcher settings control periodic rescanning and whether network work yields while you use ChatGPT. See the included historical change notes and third-party notices for additional behavior and attribution.
+After updating, select the existing backup folder and resume. Upgrade validation uses the saved conversation JSON. **Repair attachment backup** explicitly reopens failed/unavailable attachment work. Valid saved files and existing transcripts are reused; missing or invalid attachment bytes are retried through the available routes.
 
+Known error files are preserved for inspection under `attachment-errors/<conversation>/<filename>.error-response.json` before their false document entries are removed from `attachments`. Successful retrieval saves the actual file in the normal attachment location. Files still unavailable remain reported as unavailable or deferred.
 
-# v2.3.5 — queue progress and attachment integrity
+If you have the original uploads on disk, choose **Choose existing files folder** and select an enclosing folder. The exporter can reuse an eligible original with the exact filename and expected byte size, after checking for service-error content. Folder access requires your selection; the extension cannot search arbitrary folders without it.
 
-Updated September 30, 2026.
+Attachment scope covers supported document, text, data and source-code files up to 10 MB. Images, audio and video are excluded from this pass. Deleted or unavailable server files can only be recovered if a usable original exists locally or becomes available from ChatGPT.
 
-- A successful conversation read retains the newer list timestamp and records the timestamp it checked. An older detail response cannot repeatedly requeue the same chat. A genuinely newer list timestamp still queues an update.
-- Cached changed-body observations are handled once. Older passive payloads cannot replace a newer cached conversation.
-- A file-specific write failure defers that chat and lets other chats continue. After three failed attempts it is reported as failed. Retrieved chat data stays cached, so retrying its write does not repeat the conversation download. Folder access, security, and quota failures still stop for attention because they affect the whole backup.
-- Network failures, including responses without a status, have a bounded three-attempt request budget before deferral. Attachment download-link cycles and excessive redirects are rejected. Attachment routes have a shared 60-second budget, bridge calls have a 100-second timeout, and local file writes have a 90-second timeout with an attempted abort.
-- HTTP-200 attachment error envelopes, including `GetDownloadLinkError/file_not_found`, are rejected rather than saved as document bytes. Chunk transfer must advance and finish at the declared length. Known original file sizes are checked before saving.
-- Tiny previously saved attachment files are revalidated on upgrade. Local attachment matching excludes known service-error envelopes. Existing saved files are checked before their saved status is reused. Original suspect files remain on disk for inspection; an unavailable original is reported honestly.
-- Fixed a missing `safeName` import that could defer otherwise successful attachment downloads.
-- Completion text includes unavailable/deferred attachment counts.
+## Backup contents
 
-Validation: eight focused tests passed, including a failed-write queue yielding to another chat, bounded status-zero retries, stale timestamp deduplication, repeat-observation suppression, real bridge error-envelope rejection, circular-link rejection, and valid document chunking. A real Edge 154.0.4258.37 extension test in an isolated profile verified transcript writes, a real fixture attachment, rejection of a missing-file response, and rescan without a repeated conversation download. Website responses were mocked. Your live account and original attachment availability were not tested.
+| Path | Contents |
+| --- | --- |
+| `json/<conversation>.json` | Full retrieved conversation payload, including available branches |
+| `markdown/<conversation>.md` | Readable selected branch |
+| `attachments/<conversation>/...` | Eligible attachments successfully recovered |
+| `attachment-errors/<conversation>/...` | Preserved error responses from earlier false attachment saves |
+| `conversation-index.json` | Conversation metadata, hashes, revisions, classification and attachment results |
+| `export-report.json` | Discovery, progress, pacing and error details |
+| `portable-state.json` | Portable queue, discovery, schedule and pacing state |
 
-## Updating while keeping progress
+Changed conversations update their existing JSON/Markdown basenames and record revision metadata. Valid existing JSON is reused before another conversation request. Rate limits checkpoint progress and retain the server cooldown; file-specific failures yield to other work.
 
-Stop the current run. Replace files inside the same installed extension folder, then reload its card at `edge://extensions` and reopen its dashboard. Keep the same extension folder so the database identity, queue and cache remain available. Start/resume uses existing discovery cursors and saved files; a full scan is not required to install this fix.
+To move a backup to another installation, copy the whole backup folder, connect to the same account/workspace, select that folder, and import `portable-state.json`. Portable state contains queue metadata rather than full conversation bodies; the copied JSON files provide those bodies. Preserve a copy of your backup before uninstalling or clearing browser data.
 
-For recovery in another installation, connect to the same account/workspace, choose the existing backup folder, then import `portable-state.json`. The portable queue retains known links and statuses; conversation JSON in the backup folder provides the locally reusable bodies. No reset or deletion of the old backup is needed.
+## Privacy and limits
 
-## Why tiny attachment files are invalid
+The extension has no external analytics or upload backend. Authentication stays in the signed-in ChatGPT page; bearer tokens are not stored in the extension's IndexedDB or exported state. Backups and portable state contain private conversation information, so keep them separate from public source repositories and release uploads.
 
-The supplied `attachments.zip` contained 236 file entries: 235 were exactly 105 bytes containing a JSON `file_not_found` service error, and one was a 79,182-byte Markdown file. Windows may display each tiny file as 1 KB after rounding. Those error entries do not contain the original uploaded documents. This update prevents that false success and allows valid original files in a selected local file library to be reused. It cannot reconstruct documents that ChatGPT no longer serves and that are absent locally.
+Discovery depends on the conversations exposed by the enabled ChatGPT website routes. Those private endpoints can change. Completion means the enabled routes reached their end and exposed conversations were handled; it cannot prove the existence or recovery of chats the service never exposed. Sign-in challenges, changed accounts/workspaces, folder permissions and quota failures may require user action.
 
-The attachment scope remains eligible text, document and code files up to 10 MB. Existing media/type exclusions remain in place.
+## Validation
 
+All **35 focused tests passed**. Isolated Microsoft Edge 154 tests with simulated website responses checked automatic discovery of a server-only new chat, remotely changed conversations, completed streamed replies with unchanged timestamps, stable full-scan scheduling, overdue scans, Stop/Start/reload, watcher health and attachment recovery. Archive integrity, manifest assets, module imports and runtime syntax were also checked.
 
-## What v2.3/2.3.1/2.3.4 adds
+The older 52-test suite has the same 22 failing test names on the unmodified v2.3.6 baseline and v2.3.8, with no newly failing tests. That suite is not claimed as passing. These checks do not establish attachment availability or watcher behavior on a particular live ChatGPT account.
 
-### Revision-aware exports
+## License and attribution
 
-Every retrieved conversation gets a SHA-256 content fingerprint. Before a server-marked refresh, v2.3 fingerprints the previous v2.2 cache/disk JSON when available. When the body differs, the existing JSON and Markdown basename is overwritten with the current conversation and the index records the prior hash, current hash, revision count, change time, and reason.
-
-A conversation already loaded by ChatGPT can also be noticed passively. The extension compares that loaded body with its local cached body; a real difference requeues that conversation even if the server's list timestamp did not change.
-
-### Oldest-first traversal by real conversation time
-
-Download selection is ordered by `create_time`, or the earliest message creation time available in the conversation body. `update_time` is only the fallback. The queue therefore walks old conversations before newer ones based on calendar time, not on when you ran the backup.
-
-### Portable state for another computer
-
-**Export portable state** writes a JSON bundle containing:
-
-- conversation IDs, URLs, titles, discovery provenance and project association;
-- active/archived/project discovery cursors and verification state;
-- saved/pending/error metadata, content hashes and revision history;
-- Work/Codex/normal classification and its evidence;
-- passive-rescan schedule;
-- adaptive pacing tier, cooldown, success/limit history and recent policy regimes.
-
-**Import portable state / index** accepts either a v2.3 portable-state JSON or a `conversation-index.json`. It must be used with the same signed-in ChatGPT account/workspace. The state bundle intentionally does **not** duplicate full conversation bodies; copy the backup folder as well if moving computers. On the new computer, valid JSON in that folder is reused before any conversation fetch, so a copied backup can regenerate Markdown/cache without redownloading the chat.
-
-`portable-state.json`, `conversation-index.json`, and `export-report.json` are also refreshed in the backup root while the exporter runs.
-
-### Passive watcher
-
-With the exporter dashboard and its ChatGPT worker tab left open, passive mode can:
-
-- perform a full active/archived/project rescan every 2, 3, 6, or 12 hours;
-- wake sooner when already-open ChatGPT tabs expose a previously unknown conversation link;
-- wake sooner when a conversation body loaded by ChatGPT differs from the local cached fingerprint;
-- retry only genuinely transient / rate-limited attachment work after its retry window; hard unavailable files stay retired until you explicitly retry or provide a local match.
-
-A Manifest V3 alarm nudges the open dashboard every 15 minutes so a backgrounded tab does not rely only on JavaScript timers. The service worker itself does not fetch conversations or write your backup folder. Edge must be running; the dashboard and worker tab must remain available; the computer cannot be asleep.
-
-### Eligible attachment backup (under 10 MB)
-
-After a conversation is current, v2.3 scans its message metadata for attached text/document/data/source files and attempts to save eligible files under:
-
-`attachments/<conversation basename>/<filename>`
-
-Default recognized extensions include `.txt`, `.md`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.xlsm`, `.csv`, `.tsv`, `.html`, `.htm`, `.rtf`, `.odt`, `.ods`, `.pdf`, `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml`, `.xml`, common source-code/project files, SQL, notebooks, scripts, config files, and similar text/source artifacts. Images, audio and video are not part of this attachment pass.
-
-The exporter first checks permitted local folders for an exact filename + byte-size match. If found, it copies that file into the self-contained backup with no ChatGPT request. For files not found locally, the bridge reuses an observed ChatGPT download route or metadata URL when available, then tries at most one canonical signed-in file-download route. The 10 MB limit is checked from metadata/headers and again after retrieval. Hard 404 / missing-route / permission failures are recorded as unavailable and are not retried automatically; only rate limits and transient connection/server failures remain retryable.
-
-### Work / Codex / normal chat indexing
-
-The index now has `chat_kind` and `chat_kind_evidence`. Classification prefers explicit conversation metadata containing a Work or Codex marker; project discovery produces `project-chat`; otherwise the entry is `normal-chat`. This is intentionally evidence-labelled instead of guessing from the title or prose of the conversation.
-
-### Adaptive step-up / step-down pacing
-
-The controller now has persistent tiers rather than only "faster/slower":
-
-- a real 429 or observed app limit steps sensitivity upward;
-- recent native ChatGPT traffic, streaming, writes, page loads and navigation shrink the local rolling traffic budget dynamically;
-- sustained successful quiet windows step the tier down gradually;
-- recent tier changes and policy regimes persist across reloads and in portable state;
-- page-opening recovery remains more expensive than a normal read;
-- after a long wait caused **only** by the local heuristic budget, one low-cost check may be tried; server-requested cooldowns are never shortened.
-
-This uses observable traffic and responses to be polite and stable. It does not know, predict exactly, or bypass ChatGPT's hidden anti-abuse/rate-limit logic.
-
-## Existing v2.2 behavior retained
-
-- active, archived and project discovery without depending on the sidebar UI;
-- passive capture of visible/open/search-result conversation links;
-- one-conversation-at-a-time durable writes;
-- valid existing JSON recovery before refetching;
-- difficult-chat browser recovery for supported 404/412 cases;
-- incomplete discovery is reported instead of falsely called complete;
-- queue/cache/cooldown survives dashboard reloads;
-- cached-chat ZIP export remains available (with the existing memory-size guard).
-
-## Install / update in Edge
-
-For an update from v2.2:
-
-1. Pause the current exporter.
-2. Extract v2.3 and replace the files **inside the same installed unpacked-extension folder**.
-3. Open `edge://extensions` and press **Reload** on ChatGPT Exporter — English Autopilot.
-4. Reopen its dashboard. The existing IndexedDB queue/cache should still be present.
-5. Keep the same backup folder. If the previous run was complete, either leave passive mode on or press **Scan now for new / changed chats**.
-
-Do not uninstall/reinstall if preserving the existing extension database is important; an unpacked extension can receive a new identity when loaded from a different path.
-
-For a fresh install, enable Developer mode in `edge://extensions`, choose **Load unpacked**, and select the folder containing `manifest.json`.
-
-## Files written
-
-- `json/<title>_<conversation-id>.json` — complete server conversation payload, including all branches available in the payload;
-- `markdown/<title>_<conversation-id>.md` — readable selected branch;
-- `attachments/<conversation basename>/...` — eligible attachments that could be retrieved;
-- `conversation-index.json` — chronological index with chat type, hashes, revisions and attachment results;
-- `export-report.json` — detailed progress/discovery/pacing/error report;
-- `portable-state.json` — portable queue/index/schedule/adaptive-controller state.
-
-## Limits
-
-"Complete" means every conversation the enabled discovery routes exposed was saved and those discovery routes reached their end. The website uses private endpoints that can change, and the extension cannot reconstruct deleted chats or conversations ChatGPT never exposes and for which no ID/link/cache exists.
-
-A passive watcher is not a daemon: nothing runs while Edge is closed or the computer sleeps. Sign-in challenges, account/workspace changes, and revoked folder permissions still require user action.
-
-Backups contain private conversation content. The extension has no external analytics/upload backend and stores no bearer token in its IndexedDB/export files. Authentication remains in the signed-in ChatGPT page.
-
-See `THIRD-PARTY-NOTICES.md` for upstream references and bundled-library notices.
-
-
-
-## v2.3.4 attachment + recovery repair
-
-Attachment backup is now **local first**. The exporter checks files it can already see on disk before making any attachment request. Your normal backup folder is scanned automatically (excluding the transcript JSON/Markdown trees), and you can optionally click **Choose existing files folder** to grant read access to the folder tree where your original uploads/downloads live. An exact filename + byte-size match is copied into `attachments/<conversation>/...` locally so the backup remains self-contained.
-
-Browser security does **not** let an extension scan an arbitrary hard drive without permission. If an original file lives outside the selected backup folder, point the new existing-files picker at an enclosing folder once. That directory handle is kept in the same extension database for later runs.
-
-Hard attachment failures are no longer treated as endlessly retryable. A missing route / 404 / permission response is recorded as unavailable and left alone. Only HTTP 429 and genuinely transient failures stay retryable. v2.3.1 `failed` attachment records are migrated out of the six-hour retry loop automatically.
-
-The difficult-conversation browser recovery option is now off by default. If you enable it, a hard 404/412 chat gets at most one browser-opening recovery attempt per retry cycle instead of repeated deferred-navigation loops.
-
-## v2.3.1 migration + pacing repair
-
-When an existing backup folder is selected, v2.3.1 first reconciles it locally. Every conversation ID retained in `conversation-index.json` is restored to the queue, and every physically present `json/*.json` transcript is credited as already saved immediately. This local reconciliation does not consume or wait on the network pacing controller.
-
-Network pacing is now driven mainly by the adaptive tier interval. A confirmed limit steps the tier upward; a sustained clean run steps it back down. Local burst guards only protect against short overlaps with visible ChatGPT activity and are not a second five-minute quota. Locally inferred cooldowns are bounded; explicit server `Retry-After` values are honored as given.
-
-Attachment retrieval runs only after conversation discovery/verification and transcript downloading are current. Local scans that find no eligible attachments do not issue a ChatGPT request.
-
-
-## v2.3.4 prepared-attachment repair
-
-v2.3.2 could successfully prepare an attachment and then reject its local chunk copy because the generic workspace check ran again after preparation. v2.3.4 binds prepared bytes to the signed-in user instead, so workspace-header churn does not turn a good file fetch into a false retry. Successful attachment reads also feed the same adaptive success controller used by transcript reads. Local reconciliation logs now show how many local files were scanned and whether the optional existing-files folder was actually readable.
-
-
-## v2.3.4 live-hold and quiet-use behavior
-
-- Hard conversation HTTP 400/404/410/412/422 results are parked for 7 days. Normal scans and Retry unresolved do not hammer the same conversation again during that hold; a newer server update timestamp clears the hold.
-- Discovery no longer performs the old full-list verification loop. The initial traversal is authoritative when it completes cleanly; only an incomplete discovery route is repaired.
-- Attachment/transcript work continues while a discovery repair is merely waiting, instead of idling for verification.
-- **Hold in place** keeps the dashboard worker, queue position, discovery cursors, connection and in-memory engine alive. Resume continues the same loop without inventory/discovery restart. **Stop run** remains the durable stop.
-- When **Yield network work while I use ChatGPT** is enabled, clicks, keypresses, wheel/touch/scroll activity in any ChatGPT tab starts a 6-minute exporter network quiet window. Local disk/cache work is still allowed.
+Repository code is distributed under the MIT license in the repository root. Bundled third-party components retain their own notices and licenses. See `THIRD-PARTY-NOTICES.md` and `licenses/` inside the extension folder for upstream references and JSZip notices.

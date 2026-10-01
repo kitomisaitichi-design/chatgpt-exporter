@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {newJob} from '../ChatGPT-Exporter-English-Edge/core.mjs';
+import {enterWatching,hasReadyWork,hasObservedWork} from '../ChatGPT-Exporter-English-Edge/watch.mjs';
+function fixture(){const j=newJob({key:'fixture'},{attachments:false});j.sources.forEach(s=>s.done=true);j.entries={saved:{id:'saved',status:'saved',update_time:100,checkedUpdateTime:100,contentHash:'a'},bad:{id:'bad',status:'failed',brokenUntil:Date.now()+86400000}};j.status='incomplete';return j;}
+test('finished job with parked failures can watch without requeuing them',()=>{const j=fixture();assert.equal(hasReadyWork(j),false);const before=structuredClone(j.entries);enterWatching(j);assert.equal(j.status,'watching');assert.equal(j.lastRunStatus,'incomplete');assert.deepEqual(j.entries,before);assert.match(j.message,/1 unresolved/);});
+test('future retries do not repeatedly wake the export engine',()=>{const j=fixture();j.entries.retry={status:'pending',retryAt:2000};assert.equal(hasReadyWork(j,1000),false);assert.equal(hasReadyWork(j,2000),true);});
+test('watch wakes on new links or genuinely newer metadata',()=>{const j=fixture();assert.equal(hasObservedWork(j,[{hints:[{id:'new'}]}]),true);assert.equal(hasObservedWork(j,[{hints:[{id:'saved',update_time:100}]}]),false);assert.equal(hasObservedWork(j,[{hints:[{id:'saved',update_time:101}]}]),true);});
+test('watch ignores already handled body snapshots',()=>{const j=fixture();assert.equal(hasObservedWork(j,[{changedBodies:[{id:'saved',contentHash:'a'}]}]),false);j.entries.saved.observedBodyHash='b';assert.equal(hasObservedWork(j,[{changedBodies:[{id:'saved',contentHash:'b'}]}]),false);assert.equal(hasObservedWork(j,[{changedBodies:[{id:'saved',contentHash:'c'}]}]),true);});
+test('watch entry preserves scheduled scan deadline',()=>{const j=fixture();j.schedule.nextScanAt=123456;enterWatching(j);assert.equal(j.schedule.nextScanAt,123456);enterWatching(j);assert.equal(j.lastRunStatus,'incomplete');});

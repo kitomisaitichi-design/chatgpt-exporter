@@ -1,7 +1,9 @@
 import {VERSION,WEEKLY_BROKEN_MS,counts, limited, succeeded, relaxIdle, sourcePath, ingestPage, conversationValid, safeName, markdown,mergeEntry,validId,calendarTime,conversationTime,classifyConversation,extractAttachments,epoch} from './core.mjs';
 import {awareness,observeActivity,decide,recordAction,recordLimit,recordSuccess} from './awareness.mjs';
 import {mergeInventoryAttachments,ATTACHMENT_STATE_REVISION} from './attachment-state.mjs';
+import {watchCheckDue,queueFullScanIfDue,recentWatchSources,ensureWatchSchedule} from './watch.mjs';
 export class Paused extends Error {}
+export class YieldAttachments extends Error {}
 export class RequestError extends Error {constructor(status, message) {super(message || `ChatGPT returned HTTP ${status}`);this.status=status;}}
 export class Engine {
   constructor(job, io) {this.job=job;this.io=io;this.stopped=false;this.held=false;this.cachedIds=new Set();this.now=io.now || Date.now;this.sleep=io.sleep || (ms=>new Promise(r=>setTimeout(r,ms)));}
@@ -11,10 +13,18 @@ export class Engine {
   async wait(until, label) {while (this.now()<until) {await this.holdPoint();this.job.message=label;this.io.changed?.(this.job);await this.sleep(Math.min(1000,until-this.now()));}await this.holdPoint();}
   async observe() {
     if(!this.io.sense)return [];
-    const snapshots=await this.io.sense(this.job.scope);let changed=false;
+    const snapshots=await this.io.sense(this.job.scope);let changed=queueFullScanIfDue(this.job,this.now());
+    if(this.job.schedule?.enabled){this.job.schedule.lastTelemetryAt=this.now();this.job.schedule.observedTabs=snapshots.length;}
+    if(changed)this.event('Scheduled full scan queued at its fixed deadline.');
     for(const s of snapshots){
       for(const c of s.captured || [])this.cachedIds.add(c.id);
       for(const item of s.hints || [])changed=mergeEntry(this.job,item)||changed;
+      for(const item of s.changedChats || []){
+        if(!validId(item.id) || !item.revision || this.job.entries[item.id]?.nativeWriteRevision===item.revision)continue;
+        mergeEntry(this.job,{id:item.id,origin:'completed ChatGPT reply'});
+        Object.assign(this.job.entries[item.id],{nativeWriteRevision:item.revision,nativeWriteAt:item.at,status:'pending',refresh:true,attempts:0,retryAt:0,brokenUntil:0,changeReason:'ChatGPT reply completed'});changed=true;
+        this.event('Completed ChatGPT reply queued for backup.');
+      }
       for(const item of s.changedBodies || []){
         const existing=this.job.entries[item.id];
         if(existing?.observedBodyHash===item.contentHash || existing?.contentHash===item.contentHash)continue;
@@ -37,9 +47,9 @@ export class Engine {
     for(const item of items){
       const before=this.job.entries[item.id],wasRefresh=!!before?.refresh;mergeEntry(this.job,item);const e=this.job.entries[item.id];if(!e)continue;
       if(item.checkedUpdateTime && epoch(item.checkedUpdateTime)>epoch(e.checkedUpdateTime))e.checkedUpdateTime=item.checkedUpdateTime;
-      if(item.basename)e.basename=item.basename;if(item.contentHash)e.contentHash=item.contentHash;if(item.previousContentHash)e.previousContentHash=item.previousContentHash;if(item.revisionCount)e.revisionCount=Math.max(e.revisionCount || 0,item.revisionCount);if(item.changedAt)e.changedAt=e.changedAt || item.changedAt;if(item.savedAt)e.savedAt=e.savedAt || item.savedAt;if(item.chatKind)e.chatKind=item.chatKind;if(item.chatKindEvidence)e.chatKindEvidence=item.chatKindEvidence;if(item.project)e.project=e.project || item.project;mergeInventoryAttachments(e,item);
+      if(item.basename && !e.basename)e.basename=item.basename;if(item.contentHash && !e.contentHash)e.contentHash=item.contentHash;if(item.previousContentHash && !e.previousContentHash)e.previousContentHash=item.previousContentHash;if(item.revisionCount)e.revisionCount=Math.max(e.revisionCount || 0,item.revisionCount);if(item.changedAt)e.changedAt=e.changedAt || item.changedAt;if(item.savedAt)e.savedAt=e.savedAt || item.savedAt;if(item.chatKind && !e.chatKind)e.chatKind=item.chatKind;if(item.chatKindEvidence && !e.chatKindEvidence)e.chatKindEvidence=item.chatKindEvidence;if(item.project)e.project=e.project || item.project;mergeInventoryAttachments(e,item);
       if(Array.isArray(item.foundVia))e.foundVia=[...new Set([...(e.foundVia || []),...item.foundVia])];
-      if(item.diskBacked){this.cachedIds.add(item.id);if(!wasRefresh && !e.refresh){if(e.status!=='saved')diskSaved++;e.status='saved';e.error=null;e.retryAt=0;e.refresh=false;if(!e.savedAt)e.savedAt=this.now();}}
+      if(item.diskBacked){this.cachedIds.add(item.id);if(!wasRefresh && !e.refresh && before?.status!=='pending'){if(e.status!=='saved')diskSaved++;e.status='saved';e.error=null;e.retryAt=0;e.refresh=false;if(!e.savedAt)e.savedAt=this.now();}}
       else if(item.cacheBacked){this.cachedIds.add(item.id);cacheOnly++;}
       else indexOnly++;
     }
@@ -52,6 +62,7 @@ export class Engine {
     for(;;){
       await this.holdPoint();
       const snapshots=await this.observe(),decision=decide(this.job,snapshots,kind,this.now(),waitingSince);
+      if(kind==='asset' && (Object.values(this.job.entries).some(e=>e.status==='pending' && (!e.retryAt || e.retryAt<=this.now())) || this.job.sources.some(s=>!s.done&&!s.error)))throw new YieldAttachments('Attachment wait yielded to queued chat updates.');
       a.state=decision.state;a.reason=decision.reason;a.waitUntil=decision.until;this.job.message=decision.reason;this.io.changed?.(this.job);
       if(decision.attention)throw new Paused(decision.reason);if(decision.probeRequired)return false;
       if(!decision.until){recordAction(this.job,kind,this.now());if(decision.gentle)a.probe=true;await this.save();return true;}
@@ -80,7 +91,7 @@ export class Engine {
     if(!cached && this.io.diskRead){cached=await this.io.diskRead(entry.id);if(cached){entry.basename=cached.basename;await this.io.cachePut(key,cached);this.cachedIds.add(entry.id);}}
     if(cached?.data && !entry.contentHash)entry.contentHash=cached.hash || await this.io.hash(cached.data);
     if (cached && !entry.refresh) {data=cached.data;usedLocal=true;}
-    else if(cached && entry.refresh && cached.passive && cached.data.update_time && cached.data.update_time===entry.update_time){data=cached.data;usedLocal=true;}
+    else if(cached && entry.refresh && cached.passive && cached.data.update_time && cached.data.update_time===entry.update_time && (!entry.nativeWriteAt || cached.at>=entry.nativeWriteAt)){data=cached.data;usedLocal=true;}
     if (!data) {
       try {data=await this.request(`/backend-api/conversation/${encodeURIComponent(entry.id)}`);}
       catch (error) {
@@ -121,8 +132,9 @@ export class Engine {
     if(!eligible.length){entry.attachmentPending=false;entry.attachmentRetryAt=0;entry.attachmentScannedAt=this.now();await this.save();return;}
     this.job.phase='attachments';this.job.message=`Retrieving ${eligible.length} eligible attachment${eligible.length===1?'':'s'}: ${entry.title}`;await this.save();
     try {
-      const attachments=await this.io.attachments(entry,cached.data,entry.basename || entry.id,async()=>{if(await this.paceRequest('asset')===false)throw new Paused('A read check is required before attachment recovery.');});
-      if(attachments.length)entry.attachments=attachments;entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;const retryable=attachments.filter(a=>a.status==='rate-limited' || a.status==='deferred');entry.attachmentPending=retryable.length>0;entry.attachmentRetryAt=entry.attachmentPending?this.now()+6*3600000:0;entry.attachmentScannedAt=this.now();
+      const urgent=()=>Object.values(this.job.entries).some(e=>e.status==='pending' && (!e.retryAt || e.retryAt<=this.now())) || this.job.sources.some(s=>!s.done && !s.error);
+      const attachments=await this.io.attachments(entry,cached.data,entry.basename || entry.id,async()=>{await this.observe();if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');if(await this.paceRequest('asset')===false)throw new Paused('A read check is required before attachment recovery.');if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');});
+      if(attachments.length)entry.attachments=attachments;entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;const retryable=attachments.filter(a=>a.status==='rate-limited' || a.status==='deferred');entry.attachmentPending=retryable.length>0;entry.attachmentRetryAt=entry.attachmentPending?this.now()+(attachments.some(a=>a.yielded)?60000:6*3600000):0;entry.attachmentScannedAt=this.now();
       if(attachments.length){const local=attachments.filter(a=>a.status==='saved' && a.source!=='network').length,network=attachments.filter(a=>a.status==='saved' && a.source==='network').length,unavailable=attachments.filter(a=>['unavailable','permission-unavailable'].includes(a.status)).length,large=attachments.filter(a=>a.status==='skipped-too-large').length,deferred=retryable.length;if(network){const before=this.job.pace.tier || 0;for(let i=0;i<network;i++){succeeded(this.job.pace,this.now());recordSuccess(this.job,this.now());}if((this.job.pace.tier || 0)<before)this.event(`Successful attachment reads stepped pacing down to tier ${this.job.pace.tier}.`);}this.event(`Attachment pass: ${entry.title} — ${local} local, ${network} downloaded, ${unavailable} unavailable${large?`, ${large} too large`:''}${deferred?`, ${deferred} retryable`:''}.`);}else this.event(`Attachment pass: ${entry.title} — no eligible files.`);
     } catch(e){if(e instanceof Paused)throw e;entry.attachmentPending=true;entry.attachmentRetryAt=this.now()+6*3600000;entry.attachmentScannedAt=this.now();this.event(`Attachment pass transiently deferred: ${entry.title} — ${e.message || e}`);}
     this.job.phase=null;await this.save();await this.io.report(this.job);
@@ -131,6 +143,16 @@ export class Engine {
     this.job.message=`Discovering ${source.title || source.key} chats…`;await this.save();
     try {const data=await this.request(sourcePath(source));ingestPage(this.job,source,data);source.error=null;source.lastPageAt=this.now();await this.save();await this.io.index?.(this.job);}
     catch (error) {if (error instanceof Paused || !(error instanceof RequestError) && !/discovery|Discovery|page|cursor|List ended|list format|identifier/i.test(error.message)) throw error;source.error=error.message;source.failures=(source.failures || 0)+1;source.retryAt=this.now()+60000*source.failures;this.event(`Discovery deferred (${source.title || source.key}): ${error.message}`);await this.save();}
+  }
+  async checkRecentChats(){
+    const s=ensureWatchSchedule(this.job,this.now());s.lastCheckAttemptAt=this.now();s.checkState='checking';this.job.phase='watch';
+    const before=Object.keys(this.job.entries).length;let pages=0;
+    try{
+      for(const source of recentWatchSources(this.job)){const data=await this.request(sourcePath(source));ingestPage(this.job,source,data);pages++;await this.save();}
+      s.lastCheckAt=this.now();s.checkState='current';s.checkError=null;
+      this.event(`Automatic recent-chat check: ${pages} metadata pages checked; ${Object.keys(this.job.entries).length-before} new chat links indexed.`);
+    }catch(e){if(e instanceof Paused)throw e;s.checkState='deferred';s.checkError=e.message;this.event(`Automatic recent-chat check deferred: ${e.message}`);}
+    s.nextCheckAt=this.now()+(s.recentIntervalMs || 300000);this.job.phase=null;await this.save();await this.io.index?.(this.job);
   }
   async run() {
     this.stopped=false;this.job.status='running';this.job.started=true;this.job.version=VERSION;await this.save();
@@ -152,6 +174,11 @@ export class Engine {
           readsSincePage++;continue;
         }
         if (source) {await this.discover(source);readsSincePage=0;continue;}
+        if(watchCheckDue(this.job,this.now())){
+          const plan=decide(this.job,await this.observe(),'discovery',this.now());
+          if(!plan.until && !plan.attention){await this.checkRecentChats();continue;}
+          this.job.schedule.checkState=plan.attention?'needs-attention':'waiting';this.job.schedule.checkWaitReason=plan.reason;this.job.schedule.checkWaitUntil=plan.until || 0;
+        }
         const repair=this.job.options.verify!==false?this.job.sources.find(s=>s.error && (s.failures || 0)<=2 && (s.retryAt || 0)<=this.now()):null;if(repair){Object.assign(repair,{error:null,done:false,offset:0,cursor:repair.kind==='project'?'0':null,seenPages:[],uniqueIds:[],emptyChecks:0,reportedTotal:0});this.event(`Repairing only the incomplete discovery route: ${repair.title || repair.key}.`);await this.save();continue;}
         // Productive saved-file work should continue while an incomplete discovery route
         // is merely waiting for its retry time. Do not idle just to service verification.
@@ -162,7 +189,7 @@ export class Engine {
         const c=counts(this.job);this.job.status=c.failed || c.discovery ? 'incomplete':indexOnly?'indexed':'complete';
         const assets=Object.values(this.job.entries).flatMap(e=>e.attachments || []),unavailable=assets.filter(a=>['unavailable','permission-unavailable','failed'].includes(a.status)).length,deferred=assets.filter(a=>['deferred','rate-limited'].includes(a.status)).length;
         this.job.message=this.job.status==='indexed' ? `${c.total} links indexed on disk. ${c.pending} chats remain to download.` : this.job.status==='complete' ? `Finished: ${c.saved} discovered chats saved; ${c.attachments} eligible attachments saved${unavailable?`; ${unavailable} attachments unavailable`:''}${deferred?`; ${deferred} attachments deferred for a later pass`:''}.` : `Finished available work: ${c.saved} saved; ${c.failed} chats and ${c.discovery} discovery sources need attention.`;
-        if(this.job.schedule?.enabled){this.job.schedule.lastScanAt=this.now();this.job.schedule.nextScanAt=this.now()+(this.job.schedule.intervalMs || 10800000);}
+        if(this.job.schedule?.fullScanPending && !this.job.sources.some(s=>s.error || !s.done)){this.job.schedule.fullScanPending=false;this.job.schedule.lastScanAt=this.now();}
         Object.assign(awareness(this.job),{state:this.job.status,reason:this.job.message,waitUntil:0});this.event(this.job.message);await this.save();await this.io.report(this.job);break;
       }
     } catch (error) {this.job.status='paused';this.job.message=error instanceof Paused ? error.message : `Paused: ${error.message}. Progress is saved; resolve the issue and resume.`;Object.assign(awareness(this.job),{state:'paused',reason:this.job.message,waitUntil:0});this.event(this.job.message);await this.save();}

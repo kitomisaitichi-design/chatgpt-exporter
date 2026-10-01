@@ -1,8 +1,8 @@
 // Same-origin/read-only ChatGPT bridge. Authentication remains inside ChatGPT.
 (() => {
-  if (window.__englishExporterBridgeV237) return;
+  if (window.__englishExporterBridgeV238) return;
   const originalFetch = window.fetch.bind(window);
-  const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map();
+  const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map(), changedChats=new Map();
   const documentId=crypto.randomUUID(), loadedAt=Date.now();
   let routeAt=loadedAt,lastPath=location.pathname,inFlight=0,activeStreams=0,lastStart=0,lastWrite=0,lastUserInteraction=0,seq=0,events=[],blocked=null;
   const markUserInteraction=()=>{lastUserInteraction=Date.now();};
@@ -49,11 +49,19 @@
     const scope = snapshotScope(),write=!['GET','HEAD'].includes(String(options?.method || (resource instanceof Request?resource.method:'GET')).toUpperCase());
     const conversationWrite=internal && write && /^\/backend-api\/(?:f\/)?conversation(?:\/[a-zA-Z0-9_-]+)?$/.test(url.pathname);
     const historyRead=internal && !write && (/^\/backend-api\/conversations(?:\/search)?\/?$/.test(url.pathname) || /^\/backend-api\/conversation\/[a-zA-Z0-9_-]+$/.test(url.pathname) || /^\/backend-api\/gizmos\/[^/]+\/conversations$/.test(url.pathname) || url.pathname==='/backend-api/gizmos/snorlax/sidebar' || /\/files\/download\//.test(url.pathname) || /\/interpreter\/download$/.test(url.pathname));
-    const relevant=conversationWrite || historyRead;if(relevant){lastStart=Date.now();if(write)lastWrite=lastStart;inFlight++;events.push({seq:++seq,at:lastStart,write});events=events.filter(e=>Date.now()-e.at<300000).slice(-1000);}
+    let requestSeq=0;const relevant=conversationWrite || historyRead;if(relevant){lastStart=Date.now();if(write)lastWrite=lastStart;inFlight++;requestSeq=++seq;events.push({seq:requestSeq,at:lastStart,write});events=events.filter(e=>Date.now()-e.at<300000).slice(-1000);}
     try {
       const response = await originalFetch(resource, options);if (internal) void observe(response, url, scope);
-      if(conversationWrite && response.ok && response.headers.get('content-type')?.includes('text/event-stream') && response.body){activeStreams++;const reader=response.clone().body.getReader();void (async()=>{try{while(!(await reader.read()).done){}}catch{}finally{activeStreams--;lastWrite=Date.now();reader.releaseLock();}})();}
-      if(url?.origin===location.origin && url.pathname==='/api/auth/session' && response.ok)void response.clone().json().then(data=>{if(!data?.user?.id || !data.accessToken)return;if(user && user!==data.user.id){captured.clear();hints.clear();projects.clear();fileRoutes.clear();pending=null;accountHeader=null;}user=data.user.id;token=data.accessToken;sessionAt=Date.now();}).catch(()=>{});
+      if(conversationWrite && response.ok){
+        const writeSeq=requestSeq;let conversationId=url.pathname.match(/\/conversation\/([a-zA-Z0-9_-]+)$/)?.[1] || null;
+        try{const raw=options?.body || (resource instanceof Request?await resource.clone().text():null);if(typeof raw==='string')conversationId=JSON.parse(raw).conversation_id || conversationId;}catch{}
+        const completed=()=>{const id=conversationId || location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/)?.[1];if(typeof id!=='string' || !/^[a-zA-Z0-9_-]{8,160}$/.test(id))return;const at=Date.now();changedChats.set(id,{id,at,revision:`${documentId}:${writeSeq}`,scope});hint({id},scope,'completed ChatGPT reply');while(changedChats.size>500)changedChats.delete(changedChats.keys().next().value);};
+        if(response.headers.get('content-type')?.includes('text/event-stream') && response.body){
+          activeStreams++;const reader=response.clone().body.getReader(),decoder=new TextDecoder();let carry='';
+          void (async()=>{try{for(;;){const part=await reader.read();if(part.done)break;if(!conversationId){carry=(carry+decoder.decode(part.value,{stream:true})).slice(-65536);const match=carry.match(/"conversation_id"\s*:\s*"([a-zA-Z0-9_-]{8,160})"/);if(match)conversationId=match[1];}}}catch{}finally{activeStreams--;lastWrite=Date.now();reader.releaseLock();completed();}})();
+        }else completed();
+      }
+      if(url?.origin===location.origin && url.pathname==='/api/auth/session' && response.ok)void response.clone().json().then(data=>{if(!data?.user?.id || !data.accessToken)return;if(user && user!==data.user.id){captured.clear();hints.clear();projects.clear();fileRoutes.clear();changedChats.clear();pending=null;accountHeader=null;}user=data.user.id;token=data.accessToken;sessionAt=Date.now();}).catch(()=>{});
       return response;
     } finally {if(relevant)inFlight--;}
   };
@@ -61,7 +69,7 @@
     if (!force && user && token && Date.now()-sessionAt < 45000) return;
     const response = await originalFetch('/api/auth/session', {credentials:'include', signal:AbortSignal.timeout(30000)});if (!response.ok) throw Object.assign(new Error('Session request failed'), {status:response.status, retryAfter:response.headers.get('retry-after')});
     const data = await response.json();if (!data?.accessToken || !data.user?.id) throw Object.assign(new Error('Please sign in to ChatGPT in the connected tab.'), {status:401});
-    if (user && user !== data.user.id) {captured.clear();hints.clear();projects.clear();fileRoutes.clear(); pending = null; accountHeader = null;}token = data.accessToken; user = data.user.id; sessionAt = Date.now();if(force)blocked=null;
+    if (user && user !== data.user.id) {captured.clear();hints.clear();projects.clear();fileRoutes.clear();changedChats.clear(); pending = null; accountHeader = null;}token = data.accessToken; user = data.user.id; sessionAt = Date.now();if(force)blocked=null;
   }
   const matches = expected => expected && expected.user === user && (expected.account || null) === workspace();
   function authHeaders(scope){const headers={accept:'*/*',authorization:`Bearer ${token}`,'oai-language':'en-US'};const did=cookie('oai-did') || device;if(did)headers['oai-device-id']=did;if(scope.account)headers['chatgpt-account-id']=scope.account;if(pending)headers['x-oai-is-pending-updates']=pending;return headers;}
@@ -93,7 +101,7 @@
         if(lastPath!==location.pathname){lastPath=location.pathname;routeAt=Date.now();}const scope=snapshotScope();const current=location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/);if(current)hint({id:current[1]},scope,'open chat URL');
         for(const link of document.querySelectorAll('a[href]')) {try {const u=new URL(link.getAttribute('href'),location.origin);if(u.origin!==location.origin)continue;const m=u.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/);if(m)hint({id:m[1],title:link.textContent?.trim().slice(0,300)},scope,'visible app link');} catch {}}
         const challenge=!!document.querySelector('iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/"]') || /^just a moment\.{0,3}$/i.test(document.title.trim()),links=[...hints.values()].filter(scoped);
-        return {ok:true,status:200,verified,documentId,loadedAt,routeAt,readyState:document.readyState,inFlight,activeStreams,lastStart,lastWrite,lastUserInteraction,events:events.filter(e=>Date.now()-e.at<300000),blocked:challenge?'A browser check is visible. Complete it in the ChatGPT tab, then resume.':blocked,limit:verified&&scoped(lastLimit)?lastLimit:null,hints:verified?links.map(({scope,...h})=>h):links.filter(h=>['open chat URL','visible app link'].includes(h.origin)).map(h=>({id:h.id,origin:'open-tab link (server access checked on retrieval)'})),projects:verified?[...projects.values()].filter(scoped).map(({scope,...p})=>p):[],captured:verified?[...captured.entries()].filter(([,v])=>scoped(v)).map(([id,v])=>({id,at:v.at})):[],fileRoutes:verified?[...fileRoutes.values()].filter(scoped).map(({scope,...r})=>r):[]};
+        return {ok:true,status:200,verified,documentId,loadedAt,routeAt,readyState:document.readyState,inFlight,activeStreams,lastStart,lastWrite,lastUserInteraction,events:events.filter(e=>Date.now()-e.at<300000),blocked:challenge?'A browser check is visible. Complete it in the ChatGPT tab, then resume.':blocked,limit:verified&&scoped(lastLimit)?lastLimit:null,hints:verified?links.map(({scope,...h})=>h):links.filter(h=>['open chat URL','visible app link'].includes(h.origin)).map(h=>({id:h.id,origin:'open-tab link (server access checked on retrieval)'})),projects:verified?[...projects.values()].filter(scoped).map(({scope,...p})=>p):[],captured:verified?[...captured.entries()].filter(([,v])=>scoped(v)).map(([id,v])=>({id,at:v.at})):[],changedChats:verified?[...changedChats.values()].filter(scoped).map(({scope,...v})=>v):[],fileRoutes:verified?[...fileRoutes.values()].filter(scoped).map(({scope,...r})=>r):[]};
       }
       if(args.op==='cached'){if(!matches(args.scope))return {ok:false,status:409};const entry=captured.get(args.id);return entry && scoped(entry) ? {ok:true,status:200,data:entry.data,at:entry.at} : {ok:true,status:204};}
       if (args.op === 'context') {await session(true);return {ok:true, scope:snapshotScope(), status:200};}
@@ -121,7 +129,7 @@
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV237',{value:{rpc,version:'2.3.7'}, configurable:false,writable:false});
+  Object.defineProperty(window,'__englishExporterBridgeV238',{value:{rpc,version:'2.3.8'}, configurable:false,writable:false});
 })();
 
 
