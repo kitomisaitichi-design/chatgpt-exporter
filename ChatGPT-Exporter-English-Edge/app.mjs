@@ -4,9 +4,11 @@ import {recordLimit} from './awareness.mjs';
 import {Engine,Paused,YieldAttachments} from './engine.mjs';
 import {hasReadyWork,hasObservedWork,enterWatching,ensureWatchSchedule,watchCheckDue,queueFullScanIfDue} from './watch.mjs';
 import {repairAttachmentEntry,ATTACHMENT_STATE_REVISION} from './attachment-state.mjs';
+import {renderDashboard} from './ui.mjs';
 const $=id=>document.getElementById(id);
 let job=null,scope=null,folder=null,root=null,attachmentLibrary=null,localAttachmentIndex=null,engine=null,running=false,tabId=null,connected=false,canEdit=true,notice='';
 let sensed={at:0,key:null,snapshots:[]},diskFiles=null,diskIndexEntries=null,passiveBusy=false,initializing=true;
+let connecting=false;
 const harvested=new Map(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const digest=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(b=>b.toString(16).padStart(2,'0')).join('');
 const hashData=data=>digest(JSON.stringify(data));
@@ -31,6 +33,7 @@ function update() {
   const waiting=Math.max(job?.pace.until || 0,schedule.checkWaitUntil || 0)>Date.now();
   $('watch-details').textContent=job?.schedule?.enabled?`Last tab observation: ${observedAgo===null?'not yet':observedAgo+' s ago'} · ${schedule.observedTabs || 0} tabs · last server check: ${stamp(schedule.lastCheckAt)} · recent check ${recent?'in '+Math.ceil(recent/60000)+' min':'due'}${waiting?' (waiting for the network window)':''}${schedule.checkError?' · '+schedule.checkError:''}. Keep the dashboard and connected ChatGPT tab open; browser alarms wake checks when the dashboard is in the background.`:'Passive watcher is off.';
   $('log').textContent=(job?.events || []).map(e=>`${new Date(e.at).toLocaleTimeString()}  ${e.message}`).join('\n');$('connection').textContent=connected ? 'Connected':'Not connected';$('account').textContent=scope ? `User ${scope.user} · workspace ${scope.account || 'default session'}` : 'One workspace per backup.';$('folder-name').textContent=folder ? `${folder.name} / chatgpt-backup-${scope?.key.slice(0,12) || '…'}`:'No folder selected';$('attachment-library-name').textContent=attachmentLibrary ? `${attachmentLibrary.name} · exact name + size reuse`:'No local file library selected';
+  renderDashboard(document,{job,scope,connected,connecting,initializing,folder,running,notice,saved:c.saved,total:c.total,failed:c.failed+c.discovery-(job?.sources?.filter(s=>!s.done && !s.error).length || 0)});
 }
 async function bridge(args,targetId=tabId) {
   if (!targetId) throw new Paused('Connect to ChatGPT first.');
@@ -283,7 +286,7 @@ async function passiveTick(){
 }
 async function init() {
   update();
-  bind('connect',connect);
+  bind('connect',async()=>{connecting=true;update();try{await connect();}finally{connecting=false;update();}});
   bind('folder',async()=>{if (!scope) throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker({mode:'readwrite',id:'chatgpt-backup'}),previous=folder;folder=next;root=null;localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;await db.put('meta',`folder:${scope.key}`,folder);await folderReady();if (job && (!previous || !(await previous.isSameEntry(next)))) {for (const e of Object.values(job.entries)) if(e.status==='saved') {e.status='pending';e.retryAt=0;}job.status='ready';job.message='Folder changed. Valid JSON files/cache will be reused before any server retrieval.';await db.put('jobs',scope.key,job);}update();});
   bind('attachment-library',async()=>{if(!scope)throw new Paused('Connect to ChatGPT first.');attachmentLibrary=await showDirectoryPicker({mode:'read',id:'chatgpt-existing-files'});localAttachmentIndex=null;await db.put('meta',`attachmentLibrary:${scope.key}`,attachmentLibrary);await attachmentLibraryReady(true);if(job){if(!root)try{await folderReady(false);}catch{}if(root){job.message='Scanning your chosen local files folder for existing attachment matches…';update();await reconcileLocalAttachments();}else{job.message='Existing files folder saved. Grant the backup-folder permission or press Start; local attachment matching will run before any missing file uses the network.';await db.put('jobs',scope.key,job);update();}}else update();});
   bind('repair-attachments',async()=>{

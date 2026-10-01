@@ -1,25 +1,29 @@
 # ChatGPT Exporter — English Autopilot for Microsoft Edge
 
-**Version 2.3.8 · October 1, 2026**
+**Version 2.3.9 · October 1, 2026**
 
 Build a local backup of the conversations available to your signed-in ChatGPT web session. The extension discovers active, archived and project chats, writes conversation JSON and readable Markdown, tracks revisions, and backs up eligible attachments. Your backup stays in the folder you select.
 
-[Download v2.3.8](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.3.8) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
+[Download v2.3.9](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.3.9) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-## What changed in v2.3.8
+## What changed in v2.3.9
 
-- **Automatic recent-chat discovery:** Passive watcher checks recent server metadata every five minutes by default. New chats and remote updates can be discovered without opening their links in the browser. Fifteen- and thirty-minute options are available.
-- **Reliable full-scan scheduling:** The selected two-, three-, six- or twelve-hour full traversal keeps its own deadline. Small export runs no longer keep postponing it.
-- **Completed reply detection:** Replies completed in observed ChatGPT tabs queue a refresh once, including when the conversation timestamp remains unchanged.
-- **Chat updates take priority:** Attachment downloads and waits yield to queued chat updates. Pending revisions survive reload and local reconciliation.
-- **Visible watcher health:** The dashboard shows observed tab count, last tab observation, last successful server check, next check, and network waits/errors. A one-minute extension alarm supplements its timers.
-- **Attachment fixes retained:** Context-aware download routes, validation of saved bytes, local original-file reuse, and explicit repair of earlier false downloads remain included.
+The dashboard now puts backup progress and run controls first, with account and folder setup alongside them on wide screens. Watcher settings, backup scope, recovery tools, portable state and activity have their own labeled panels.
 
-Detailed change notes are included as `CHANGELOG-v2.3.8.md` inside the extension folder.
+- A clearer dark layout, compact navigation and responsive spacing.
+- Six counters, saved-chat totals and percentage, and visible attention indicators.
+- Clear headings and colors for exporting, watching, waiting, paused, held, complete and error states.
+- Visible Connecting feedback, account/folder readiness and concise account labels.
+- Separate recent-check and full-discovery selectors, with watcher enable/off feedback.
+- Keyboard focus indicators, form labels and reduced-motion support.
+
+This is a dashboard update. Conversation retrieval, attachment handling, saved queue/cache, adaptive pacing and v2.3.8 watcher scheduling retain their working behavior. The same-folder upgrade retains your progress.
+
+Detailed change notes are included as `CHANGELOG-v2.3.9.md` inside the extension folder.
 
 ## Install in Edge
 
-1. Download **ChatGPT-Exporter-English-Edge-v2.3.8.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
+1. Download **ChatGPT-Exporter-English-Edge-v2.3.9.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
 2. Extract the ZIP to a permanent folder. Inside it, find `ChatGPT-Exporter-English-Edge`, which contains `manifest.json`.
 3. Open `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
 4. Open the exporter dashboard from the extension. Connect to the intended signed-in ChatGPT account and workspace.
@@ -88,9 +92,9 @@ Discovery depends on the conversations exposed by the enabled ChatGPT website ro
 
 ## Validation
 
-All **35 focused tests passed**. Isolated Microsoft Edge 154 tests with simulated website responses checked automatic discovery of a server-only new chat, remotely changed conversations, completed streamed replies with unchanged timestamps, stable full-scan scheduling, overdue scans, Stop/Start/reload, watcher health and attachment recovery. Archive integrity, manifest assets, module imports and runtime syntax were also checked.
+All **35 focused tests passed**. Additional Edge dashboard checks verified busy connection feedback, setup readiness, original control IDs, watcher toggling, recovery/manual-link controls, visual status states and six viewport widths from 320 to 1440 pixels without horizontal overflow. Isolated Microsoft Edge 154 tests with simulated website responses checked automatic discovery of a server-only new chat, remotely changed conversations, completed streamed replies with unchanged timestamps, stable full-scan scheduling, overdue scans, Stop/Start/reload, watcher health and attachment recovery. Archive integrity, manifest assets, module imports and runtime syntax were also checked.
 
-The older 52-test suite has the same 22 failing test names on the unmodified v2.3.6 baseline and v2.3.8, with no newly failing tests. That suite is not claimed as passing. These checks do not establish attachment availability or watcher behavior on a particular live ChatGPT account.
+The historical 52-test suite previously retained the same 22 failing test names between v2.3.6 and v2.3.8. The focused tests and browser checks above are the validation for this UI update. These checks do not establish attachment availability or watcher behavior on a particular live ChatGPT account.
 
 ## License and attribution
 
