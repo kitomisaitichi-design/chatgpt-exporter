@@ -1,6 +1,6 @@
 // Same-origin/read-only ChatGPT bridge. Authentication remains inside ChatGPT.
 (() => {
-  if (window.__englishExporterBridgeV240) return;
+  if (window.__englishExporterBridgeV242) return;
   const originalFetch = window.fetch.bind(window);
   const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map(), changedChats=new Map(), libraryItems=new Map(),libraryRoutes=new Map();
   const documentId=crypto.randomUUID(), loadedAt=Date.now();
@@ -8,6 +8,7 @@
   const markUserInteraction=()=>{lastUserInteraction=Date.now();};
   for(const type of ['pointerdown','keydown','wheel','touchstart'])window.addEventListener(type,markUserInteraction,{capture:true,passive:true});
   let token = null, user = null, sessionAt = 0, accountHeader = null, pending = null, device = null,lastLimit = null;
+  const frontendHeaders=new Map();
   const cookie = name => {const value = document.cookie.split('; ').find(x => x.startsWith(name+'='))?.slice(name.length+1);try { return value ? decodeURIComponent(value) : null; } catch { return value || null; }};
   const workspace = () => cookie('_account') || accountHeader || null;
   const snapshotScope = () => ({user, account:workspace()});
@@ -52,7 +53,7 @@
   window.fetch = async function(resource, options) {
     let url;try { url = new URL(typeof resource === 'string' || resource instanceof URL ? resource : resource.url, location.href); } catch {}
     const internal = url?.origin === location.origin && url.pathname.startsWith('/backend-api/');
-    if (internal) {try {const headers = new Headers(resource instanceof Request ? resource.headers : undefined);new Headers(options?.headers).forEach((v,k) => headers.set(k,v));const auth = headers.get('authorization');if (auth?.startsWith('Bearer ') && auth !== 'Bearer dummy') token = auth.slice(7);if (headers.has('chatgpt-account-id')) accountHeader = headers.get('chatgpt-account-id');if (headers.has('oai-device-id')) device = headers.get('oai-device-id');if (headers.has('x-oai-is-pending-updates')) pending = headers.get('x-oai-is-pending-updates');} catch {}}
+    if (internal) {try {const headers = new Headers(resource instanceof Request ? resource.headers : undefined);new Headers(options?.headers).forEach((v,k) => headers.set(k,v));const auth = headers.get('authorization');if (auth?.startsWith('Bearer ') && auth !== 'Bearer dummy') token = auth.slice(7);if (headers.has('chatgpt-account-id')) accountHeader = headers.get('chatgpt-account-id');if (headers.has('oai-device-id')) device = headers.get('oai-device-id');if (headers.has('x-oai-is-pending-updates')) pending = headers.get('x-oai-is-pending-updates');for(const name of ['oai-did','originator','x-openai-web-frontend','x-openai-codex-window-type','x-oai-mcp-form-version']){const value=headers.get(name);if(value && value.length<=200 && !/[\r\n]/.test(value))frontendHeaders.set(name,value);}} catch {}}
     const scope = snapshotScope(),write=!['GET','HEAD'].includes(String(options?.method || (resource instanceof Request?resource.method:'GET')).toUpperCase());
     const conversationWrite=internal && write && /^\/backend-api\/(?:f\/)?conversation(?:\/[a-zA-Z0-9_-]+)?$/.test(url.pathname);
     const historyRead=internal && !write && (/^\/backend-api\/conversations(?:\/search)?\/?$/.test(url.pathname) || /^\/backend-api\/conversation\/[a-zA-Z0-9_-]+$/.test(url.pathname) || /^\/backend-api\/gizmos\/[^/]+\/conversations$/.test(url.pathname) || url.pathname==='/backend-api/gizmos/snorlax/sidebar' || /\/files\/download\//.test(url.pathname) || /\/interpreter\/download$/.test(url.pathname));
@@ -79,7 +80,7 @@
     if (user && user !== data.user.id) {captured.clear();hints.clear();projects.clear();fileRoutes.clear();changedChats.clear();libraryItems.clear();libraryRoutes.clear(); pending = null; accountHeader = null;}token = data.accessToken; user = data.user.id; sessionAt = Date.now();if(force)blocked=null;
   }
   const matches = expected => expected && expected.user === user && (expected.account || null) === workspace();
-  function authHeaders(scope){const headers={accept:'*/*',authorization:`Bearer ${token}`,'oai-language':'en-US'};const did=cookie('oai-did') || device;if(did)headers['oai-device-id']=did;if(scope.account)headers['chatgpt-account-id']=scope.account;if(pending)headers['x-oai-is-pending-updates']=pending;return headers;}
+  function authHeaders(scope){const headers={...Object.fromEntries(frontendHeaders),accept:'*/*',authorization:`Bearer ${token}`,'oai-language':'en-US'};const did=cookie('oai-did') || device;if(did){headers['oai-device-id']=did;headers['oai-did']=did;}if(scope.account)headers['chatgpt-account-id']=scope.account;if(pending)headers['x-oai-is-pending-updates']=pending;return headers;}
   async function fetchAssetCandidate(candidate,scope,maxBytes,visited=new Set(),deadline=Date.now()+60000){
     let url;try{url=new URL(candidate,location.origin);}catch{return null;}
     if(!['https:'].includes(url.protocol))return null;
@@ -140,9 +141,9 @@
       if (args.op === 'peek') {const entry = captured.get(args.id);if (entry && entry.at >= args.since && (!entry.scope.user || entry.scope.user === user) && (entry.scope.account || null) === (args.scope.account || null)) return {ok:true,status:200,data:entry.data};return {ok:true,status:204,limit:lastLimit};}
       if(args.op==='libraryList'){
         if(lastLimit && lastLimit.at>(args.lastLimitSeen || 0))return {ok:false,status:429,retryAfter:lastLimit.retryAfter,observedAt:lastLimit.at};
-        const source=args.source || {},params=new URLSearchParams({limit:'100',offset:String(Math.max(0,Number(source.offset)||0))});if(source.parent)params.set('parent_directory_id',String(source.parent));if(source.cursor)params.set('cursor',String(source.cursor));
+        const source=args.source || {},params=new URLSearchParams({entry_surface:'library',include_hidden_files:'false',include_files:'true',include_saved_entities:'true',include_sites:'false',include_folder_counts:'false',hydrate_folder_thumbnails:'true',limit:'100',offset:String(Math.max(0,Number(source.offset)||0))});if(source.parent)params.set('parent_directory_id',String(source.parent));if(source.cursor)params.set('cursor',String(source.cursor));
         const nodes=source.mode!=='files',path=nodes?'/backend-api/files/library/nodes?'+params:'/backend-api/files/library';
-        const response=await originalFetch(path,{method:nodes?'GET':'POST',credentials:'include',headers:{...authHeaders(args.scope),accept:'application/json',...nodes?{}:{'content-type':'application/json'}},...nodes?{}:{body:JSON.stringify({limit:100,offset:Math.max(0,Number(source.offset)||0),...source.cursor?{cursor:String(source.cursor)}:{}})},signal:AbortSignal.timeout(60000)});
+        const response=await originalFetch(path,{method:nodes?'GET':'POST',credentials:'include',headers:{...authHeaders(args.scope),accept:'application/json',...nodes?{}:{'content-type':'application/json'}},...nodes?{}:{body:JSON.stringify({limit:100,cursor:source.cursor || null,categories:[],source:null,include_hidden_files:false,include_saved_entities:true,include_sites:false,trashed_only:false,ranking:'recent',providers:[],offset:Math.max(0,Number(source.offset)||0)})},signal:AbortSignal.timeout(60000)});
         if(!response.ok)return {ok:false,status:response.status,retryAfter:response.headers.get('retry-after')};
         if(!(response.headers.get('content-type') || '').includes('json'))return {ok:false,status:403,error:'Open the Library in ChatGPT and finish sign-in or browser verification.'};
         const observed=response.clone(),data=await response.json();if(!matches(args.scope))return {ok:false,status:409,error:'Workspace changed during Library discovery.'};void observe(observed,new URL(path,location.origin),args.scope).catch(()=>{});return {ok:true,status:200,data};
@@ -153,8 +154,9 @@
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV240',{value:{rpc,version:'2.4.1'}, configurable:false,writable:false});
-  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV240});
+  Object.defineProperty(window,'__englishExporterBridgeV242',{value:{rpc,version:'2.4.2'}, configurable:false,writable:false});
+  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV242});
+  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV242});
 })();
 
 

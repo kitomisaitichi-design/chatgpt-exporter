@@ -1,4 +1,5 @@
-import {LIBRARY_LIMIT,libraryState,queueLibraryScan,libraryIndex,libraryPath,libraryCandidates,manualFiles} from './library.mjs';
+import {LibraryPanel} from './library-ui.mjs';
+import {LIBRARY_LIMIT,libraryState,queueLibraryScan,libraryIndex,libraryPath,libraryCandidates,manualFiles,retryLibraryFile,LIBRARY_FAILURE_LIMIT} from './library.mjs';
 import {CatalogWriter} from './catalog-writer.mjs';
 import {LogPanel,appendEvent} from './logs.mjs';
 import {conversationFiles,libraryFileMap,viewerHandoff,catalogHTML} from './interop.mjs';
@@ -12,7 +13,7 @@ import {renderDashboard} from './ui.mjs';
 const $=id=>document.getElementById(id);
 let job=null,scope=null,folder=null,root=null,attachmentLibrary=null,localAttachmentIndex=null,engine=null,running=false,tabId=null,connected=false,canEdit=true,notice='';
 let sensed={at:0,key:null,snapshots:[]},diskFiles=null,diskIndexEntries=null,passiveBusy=false,initializing=true;
-let connecting=false,logPanel=null,libraryRenderKey='';
+let connecting=false,logPanel=null,libraryPanel=null;
 const harvested=new Map(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const digest=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(b=>b.toString(16).padStart(2,'0')).join('');
 const hashData=data=>digest(JSON.stringify(data));
@@ -42,7 +43,7 @@ function update() {
 async function bridge(args,targetId=tabId) {
   if (!targetId) throw new Paused('Connect to ChatGPT first.');
   let timer;let results;
-  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV240) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV240.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
+  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV242) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV242.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
   return results[0]?.result || {ok:false,status:0,kind:'bridge'};
 }
 async function sense(expected) {
@@ -142,6 +143,9 @@ function migrateLoadedJob(j){
     j.events ||= [];j.events.push({at:now,message: `v2.3.7 attachment repair: ${requeued} saved chats queued for local byte validation and corrected file routes; transcript/discovery state retained.`});
     j.events=j.events.slice(-1500);changed=true;
   }
+  const lib=libraryState(j,now);
+  for(const f of Object.values(lib.entries))if((f.attempts || 0)>=LIBRARY_FAILURE_LIMIT && f.status!=='saved' && !f.parked){f.parked=true;f.status='unavailable';f.retryAt=0;f.parkedAt ||= now;changed=true;}
+  if(lib.discoveryRevision!==2){lib.discoveryRevision=2;lib.sources=[];lib.nextScanAt=now;lib.state='ready';changed=true;}
   if(j.version!==VERSION){ensureWatchSchedule(j,now);j.version=VERSION;changed=true;}
   return changed;
 }
@@ -244,7 +248,6 @@ async function backupAttachments(entry,data,basename,beforeRequest){
   return results;
 }
 
-let libraryPageLimit=100;
 async function ensureLibraryJob(){if(!connected || !scope)throw new Paused('Connect to ChatGPT first.');await folderReady(true);job ||= newJob(scope);job.options.library=true;$('library-enabled').checked=true;}
 async function fileAt(path){let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);return (await d.getFileHandle(parts.at(-1))).getFile();}
 async function byteHash(blob){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');}
@@ -261,22 +264,13 @@ async function downloadLibraryFile(f,beforeRequest){
     if(f.size!==null){const inventory=await buildLocalAttachmentIndex(),candidates=(inventory.index.get(localKey(f.name)) || []).filter(x=>x.size===f.size && x.size<LIBRARY_LIMIT);if(candidates.length===1){const file=await candidates[0].handle.getFile(),hash=await byteHash(file);if(!f.sha256 || f.sha256===hash){await engine?.holdPoint();await write(dest,file);return {status:'saved',source:'local-copy',size:file.size,path:dest,sha256:hash};}}}
   }
   await beforeRequest();const prep=await bridge({op:'assetPrepare',scope,fileId:f.fileId || f.id,library:true,candidates:libraryCandidates(f),maxBytes:LIBRARY_LIMIT-1});
-  if(!prep.ok){if(prep.status===429){limited(job.pace,prep.retryAfter);recordLimit(job);}return {status:prep.status===413?'manual':[401,403,409].includes(prep.status)?'permission-unavailable':!prep.status||prep.status>=500||prep.status===429?'deferred':'unavailable',size:prep.size || f.size,error:prep.error || 'HTTP '+prep.status};}
+  if(!prep.ok){if([401,409].includes(prep.status))throw new Paused(prep.error || 'Reconnect to ChatGPT before downloading Library files.');return {status:prep.status===413?'manual':'deferred',httpStatus:prep.status,retryAfter:prep.retryAfter,routesTried:prep.attempts || [],size:prep.size ?? f.size,error:prep.error || 'HTTP '+prep.status};}
   const chunks=[];let offset=0;
   try{for(;;){await engine?.holdPoint();const part=await bridge({op:'assetChunk',key:prep.key,offset,length:384*1024});if(!part.ok)throw Error(part.error || 'Library file chunk failed.');const bytes=decode64(part.base64);if(part.next!==offset+bytes.length || !part.done&&part.next<=offset || part.next>=LIBRARY_LIMIT)throw Error('Library chunk exceeded its boundary or made no progress.');chunks.push(bytes);offset=part.next;if(part.done){if(offset!==prep.size)throw Error('Library file bytes were incomplete.');break;}}}finally{await bridge({op:'assetRelease',key:prep.key}).catch(()=>{});}
   const blob=new Blob(chunks,{type:prep.type || f.mime || 'application/octet-stream'});if(f.size!==null && blob.size!==f.size)throw Error('Library file size differs from its metadata.');if(attachmentError(await blob.slice(0,8192).text()))return {status:'unavailable',error:'Library service returned an error envelope instead of file bytes.'};
-  const hash=await byteHash(blob);await engine?.holdPoint();await write(dest,blob);localAttachmentIndex=null;return {status:'saved',source:'network',refresh:false,size:blob.size,path:dest,sha256:hash,mime:prep.type || f.mime};
+  const hash=await byteHash(blob);await engine?.holdPoint();await write(dest,blob);localAttachmentIndex=null;return {status:'saved',source:'network',refresh:false,size:blob.size,path:dest,sha256:hash,mime:prep.type || f.mime,routesTried:prep.attempts || []};
 }
-function renderLibrary(){
-  const s=job?.library,all=Object.values(s?.entries || {}),saved=all.filter(f=>f.status==='saved').length,manual=all.filter(f=>f.status==='manual').length,pending=all.filter(f=>['pending','deferred'].includes(f.status)).length;
-  $('library-summary').textContent=all.length?saved+' saved · '+manual+' at or above 10 MB · '+pending+' pending · '+(all.length-saved-manual-pending)+' need attention':'No Library inventory yet.';
-  const next=s?.nextScanAt?Math.max(0,Math.ceil((s.nextScanAt-Date.now())/60000)):0;
-  $('library-status').textContent=job?.options?.library===false?'Library automatic backup is off.':s?.sources?.some(x=>x.error)?'Library inventory incomplete: '+s.sources.filter(x=>x.error).map(x=>x.error).join('; '):s?.lastScanAt?(s.sources.every(x=>x.done&&!x.error)?'Inventory complete':'Inventory incomplete')+' · next check '+next+' min · files saved under attachments/library/':'Library inventory runs after available chat work; scan manually to start now.';
-  const search=$('library-search').value.trim().toLocaleLowerCase(),filter=$('library-filter').value,filtered=all.filter(f=>(!search||(f.name+' '+f.id).toLocaleLowerCase().includes(search))&&(filter==='all'||filter==='manual'&&f.status==='manual'||filter==='saved'&&f.status==='saved'||filter==='attention'&& !['saved','manual'].includes(f.status))),key=JSON.stringify([filtered.map(f=>[f.id,f.name,f.size,f.status,f.path,f.error]),libraryPageLimit]);
-  if(key===libraryRenderKey)return;libraryRenderKey=key;const container=$('library-files');container.replaceChildren();
-  for(const f of filtered.slice(0,libraryPageLimit)){const row=document.createElement('div');row.className='library-row';const label=document.createElement('div'),name=document.createElement('strong'),meta=document.createElement('small'),a=document.createElement('a');name.textContent=f.name;meta.textContent=(f.size===null?'Size not yet known':(f.size/1000000).toFixed(2)+' MB')+' · '+f.status+(f.error?' · '+f.error:'');label.append(name,meta);a.textContent='Open in ChatGPT ↗';a.href=f.parent?'https://chatgpt.com/library/d/'+encodeURIComponent(f.parent):'https://chatgpt.com/library';a.target='_blank';a.rel='noopener';row.append(label,a);container.append(row);}
-  if(filtered.length>libraryPageLimit){const more=document.createElement('button');more.dataset.action='show-more';more.textContent='Show next 100 · '+(filtered.length-libraryPageLimit)+' remaining';container.append(more);}if(!filtered.length){const empty=document.createElement('p');empty.className='hint';empty.textContent=all.length?'No matching files.':'Scan the Library to list your files and their download status.';container.append(empty);}
-}
+function renderLibrary(){libraryPanel?.update(job,{running,canEdit,initializing});}
 
 async function reconcileLocalAttachments(){
   if(!job || !root)return {matched:0,checked:0};localAttachmentIndex=null;const inventory=await buildLocalAttachmentIndex();const libraryGranted=await attachmentLibraryReady(false);let matched=0,checked=0;
@@ -329,12 +323,12 @@ async function passiveTick(){
 }
 async function init() {
   logPanel=new LogPanel(document,{download,onError:error});
+  libraryPanel=new LibraryPanel(document,{onError:error,retry:async id=>{if(running || !canEdit || initializing)return;await ensureLibraryJob();if(!retryLibraryFile(job.library.entries[id]))return;await db.put('jobs',scope.key,job);await report(job);update();await start(false,true);}});
   bind('library-scan',async()=>{await ensureLibraryJob();queueLibraryScan(job,Date.now(),true);await db.put('jobs',scope.key,job);await start(false,true);});
-  bind('library-retry',async()=>{await ensureLibraryJob();for(const f of Object.values(libraryState(job).entries)){if(f.status!=='saved'&&f.status!=='manual'){f.status='pending';f.retryAt=0;f.attempts=0;}}for(const source of job.library.sources)if(source.error){source.failures=0;source.error=null;source.retryAt=0;}await db.put('jobs',scope.key,job);await start(false,true);});
+  bind('library-retry',async()=>{await ensureLibraryJob();for(const f of Object.values(libraryState(job).entries))if(f.parked || ['unavailable','permission-unavailable'].includes(f.status))retryLibraryFile(f);await db.put('jobs',scope.key,job);await report(job);await start(false,true);});
   bind('library-index',()=>{if(job)download(new Blob([JSON.stringify(libraryIndex(job),null,2)],{type:'application/json'}),'chatgpt-library-index.json');});
   bind('library-manual',()=>{if(job)download(new Blob([catalogHTML(job,true)],{type:'text/html'}),'chatgpt-library-manual-downloads.html');});
-  for(const id of ['library-search','library-filter'])$(id).addEventListener(id==='library-search'?'input':'change',()=>{libraryRenderKey='';renderLibrary();});
-  $('library-files').addEventListener('click',e=>{if(e.target.dataset.action==='show-more'){libraryPageLimit+=100;libraryRenderKey='';renderLibrary();}});
+
   addEventListener('online',()=>{if(job?.schedule){job.schedule.checkError=null;job.schedule.checkWaitUntil=0;}void passiveTick();});
   update();
   bind('connect',async()=>{connecting=true;update();try{await connect();}finally{connecting=false;update();}});

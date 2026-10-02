@@ -1,7 +1,7 @@
 import {libraryIndex,libraryPath,linkedLibraryFiles,manualFiles} from './library.mjs';
 export const encodePath=path=>path.split('/').map(encodeURIComponent).join('/');
 export const escapeHTML=text=>String(text??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export function libraryFileMap(job){const map=new Map();for(const f of Object.values(job.library?.entries || {})){const item={id:f.fileId || f.id,name:f.name,status:f.status,path:f.path || null,expected_path:libraryPath(f),size:f.size,mime:f.mime,sha256:f.sha256,source:'chatgpt-library'};for(const id of f.conversationIds || []){if(!map.has(id))map.set(id,[]);map.get(id).push(item);}}return map;}
+export function libraryFileMap(job){const map=new Map();for(const f of Object.values(job.library?.entries || {})){const item={id:f.fileId || f.id,name:f.name,status:f.status,attempts:f.attempts || 0,parked:!!f.parked,error:f.error || null,path:f.path || null,expected_path:libraryPath(f),size:f.size,mime:f.mime,sha256:f.sha256,source:'chatgpt-library'};for(const id of f.conversationIds || []){if(!map.has(id))map.set(id,[]);map.get(id).push(item);}}return map;}
 export function conversationFiles(job,entry,map=libraryFileMap(job)){
   const library=map.get(entry.id) || [];
   const seen=new Set();return [...(entry.attachments || []),...library].filter(f=>{const key=f.path || `${f.id}:${f.name}`;if(seen.has(key))return false;seen.add(key);return true;});

@@ -16,7 +16,7 @@ for(const relative of fs.readdirSync(source,{recursive:true}).map(p=>p.replaceAl
 }
 const bytes=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',platform:'DOS'});
 const checked=await Zip.loadAsync(bytes,{checkCRC32:true});
-for(const file of [manifest.background.service_worker,...manifest.content_scripts.flatMap(x=>x.js),...Object.values(manifest.icons),'exporter.html','style.css','README.md',`CHANGELOG-v${version}.md`])if(!checked.file(prefix+file))throw Error('Missing release file: '+file);
+for(const file of [manifest.background.service_worker,...manifest.content_scripts.flatMap(x=>x.js),...Object.values(manifest.icons),'exporter.html','style.css','library.css','README.md',`CHANGELOG-v${version}.md`])if(!checked.file(prefix+file))throw Error('Missing release file: '+file);
 for(const [name,file] of Object.entries(checked.files)){
   if(/node_modules|profiles|fixtures|(?:^|\/)tests\//.test(name))throw Error('Unexpected private/test data');
   if(!name.endsWith('.mjs'))continue;
