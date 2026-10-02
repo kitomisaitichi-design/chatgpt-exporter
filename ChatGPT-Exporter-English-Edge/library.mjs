@@ -31,6 +31,7 @@ export function libraryPage(data) {
 export function mergeLibraryItem(state,item,now=Date.now()) {
   if(item.directory){state.directories[item.id]=item;return false;}
   const old=state.entries[item.id];
+  if(old){item={...item};for(const key of ['size','mime','created','updated','fileId','libraryId','parent'])if(item[key]==null)item[key]=old[key];if(item.name===item.id && old.name)item.name=old.name;}
   const changed=old && ((item.size!==null && old.size!==null && item.size!==old.size) || epoch(item.updated)>epoch(old.updated));
   const status=item.size!==null && item.size>=LIBRARY_LIMIT?'manual':!old||changed?'pending':old.status;
   state.entries[item.id]={...old,...item,conversationIds:[...new Set([...(old?.conversationIds || []),...item.conversationIds])],status,seenAt:now,...changed?{path:null,sha256:null,refresh:true,retryAt:0,attempts:0,error:null}:{}};
@@ -58,7 +59,7 @@ export function libraryCandidates(file) {
   return out;
 }
 export function libraryIndex(job) {
-  const s=libraryState(job),entries=Object.values(s.entries).sort((a,b)=>a.name.localeCompare(b.name)).map(({id,fileId,libraryId,name,size,mime,parent,created,updated,conversationIds,status,path,sha256,savedAt,error})=>({id,file_id:fileId,library_file_id:libraryId,name,size,mime,parent,created,updated,conversation_ids:conversationIds,status,path:path || null,sha256:sha256 || null,saved_at:savedAt || null,error:error || null,manual_url:parent?`https://chatgpt.com/library/d/${encodeURIComponent(parent)}`:'https://chatgpt.com/library',conversation_urls:conversationIds.map(id=>`https://chatgpt.com/c/${encodeURIComponent(id)}`)}));
+  const s=libraryState(job),entries=Object.values(s.entries).sort((a,b)=>a.name.localeCompare(b.name)).map(({id,fileId,libraryId,name,size,mime,parent,created,updated,conversationIds,status,path,sha256,savedAt,error})=>({id,file_id:fileId,library_file_id:libraryId,name,size,mime,parent,created,updated,conversation_ids:conversationIds,status,path:path || null,expected_path:libraryPath({id,name}),sha256:sha256 || null,saved_at:savedAt || null,error:error || null,manual_url:parent?`https://chatgpt.com/library/d/${encodeURIComponent(parent)}`:'https://chatgpt.com/library',conversation_urls:conversationIds.map(id=>`https://chatgpt.com/c/${encodeURIComponent(id)}`)}));
   return {schema:'chatgpt-library-index/v1',version:job.version,generated_at:new Date().toISOString(),scope_key:job.scope.key,automatic_download_limit_bytes:LIBRARY_LIMIT,limit_rule:'strictly-less-than',state:s.state || 'ready',coverage_complete:!!s.lastScanAt && s.sources.every(x=>x.done&&!x.error),last_scan_at:s.lastScanAt || null,next_scan_at:s.nextScanAt,discovery:s.sources.map(({key,parent,mode,done,error})=>({key,parent,mode,done,error:error || null})),directories:Object.values(s.directories),entries};
 }
 export function manualFiles(job){return libraryIndex(job).entries.filter(x=>x.status!=='saved');}
@@ -71,17 +72,19 @@ export async function processLibrary(engine,work) {
     try{
       await engine.paceRequest('discovery');
       const response=await engine.io.libraryList(source,j.scope);
+      if(response.observedAt)j.lastLimitSeen=Math.max(j.lastLimitSeen || 0,response.observedAt);
       if(!response.ok){
         if(source.key==='root'&&source.mode==='nodes'&&[400,404,405,422].includes(response.status)){source.mode='files';source.offset=0;source.cursor=null;await engine.save();return;}
         const e=Error(response.error || `Library list returned HTTP ${response.status || 0}.`);e.status=response.status;e.retryAfter=response.retryAfter;throw e;
       }
       const page=libraryPage(response.data),ids=page.items.map(x=>normalizeLibraryItem(x,source.parent)?.id || ''),fingerprint=JSON.stringify(ids);
       if(page.items.length&&source.seen.includes(fingerprint))throw Error('Library repeated a page; stopped to avoid a download loop.');
-      if(page.items.length)source.seen.push(fingerprint);
-      for(const raw of page.items){const item=normalizeLibraryItem(raw,source.parent);if(!item)throw Error('A Library entry had no stable ID; coverage remains incomplete.');if(!source.seenIds.includes(item.id))source.seenIds.push(item.id);mergeLibraryItem(s,item,now());if(item.directory && s.sources.length<2000 && !s.sources.some(x=>x.parent===item.id))s.sources.push({key:item.id,parent:item.id,mode:'nodes',cursor:null,offset:0,done:false,seen:[],seenIds:[],failures:0});}
+
+      for(const raw of page.items){const item=normalizeLibraryItem(raw,source.parent);if(!item)throw Error('A Library entry had no stable ID; coverage remains incomplete.');if(!source.seenIds.includes(item.id))source.seenIds.push(item.id);mergeLibraryItem(s,item,now());if(item.directory && !s.sources.some(x=>x.parent===item.id)){if(s.sources.length>=2000)throw Error('Library folder limit reached; choose a narrower Library or download remaining folders manually.');s.sources.push({key:item.id,parent:item.id,mode:'nodes',cursor:null,offset:0,done:false,seen:[],seenIds:[],failures:0});}}
       if(page.cursor===source.cursor && page.cursor)throw Error('Library repeated its pagination cursor.');
+      if(page.items.length)source.seen.push(fingerprint);
       source.offset+=page.items.length;source.cursor=page.cursor;
-      if(page.cursor || page.hasMore===true || page.total!==null&&source.seenIds.length<page.total){if(!page.items.length)throw Error('Library ended before its reported total.');}
+      if(page.cursor || page.hasMore===true || page.total!==null&&source.seenIds.length<page.total || page.hasMore===null&&page.total===null&&page.items.length>=100){if(!page.items.length)throw Error('Library ended before its reported total.');}
       else source.done=true;
       source.failures=0;source.error=null;s.mode=s.sources[0].mode;
       if(s.sources.every(x=>x.done&&!x.error)){s.lastScanAt=now();s.state='indexed';engine.event(`Library inventory ready: ${Object.keys(s.entries).length} files; ${Object.values(s.entries).filter(x=>x.status==='manual').length} at or above 10 MB listed for manual download.`,'info','library');}

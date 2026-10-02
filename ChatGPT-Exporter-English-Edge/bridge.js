@@ -88,7 +88,7 @@
     if(Date.now()>=deadline)return {status:504,error:'Attachment download timed out.'};
     let response=await originalFetch(url.href,{method:'GET',credentials:url.origin===location.origin?'include':'omit',headers:url.origin===location.origin?authHeaders(scope):undefined,signal:AbortSignal.timeout(Math.max(1,deadline-Date.now()))});
     if(!response.ok)return {status:response.status,retryAfter:response.headers.get('retry-after')};
-    const length=Number(response.headers.get('content-length') || 0);if(length>maxBytes)return {tooLarge:true,size:length};
+    const length=Number(response.headers.get('content-length') || 0);if(length>maxBytes){await response.body?.cancel().catch(()=>{});return {tooLarge:true,size:length};}
     const type=response.headers.get('content-type') || '';
     const chunks=[];let size=0;
     if(response.body){const reader=response.body.getReader();try{for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>maxBytes){await reader.cancel().catch(()=>{});return {tooLarge:true,size};}chunks.push(part.value);}}finally{reader.releaseLock();}}
@@ -153,7 +153,7 @@
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV240',{value:{rpc,version:'2.4.0'}, configurable:false,writable:false});
+  Object.defineProperty(window,'__englishExporterBridgeV240',{value:{rpc,version:'2.4.1'}, configurable:false,writable:false});
   if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV240});
 })();
 

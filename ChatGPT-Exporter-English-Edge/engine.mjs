@@ -16,7 +16,7 @@ export class Engine {
   async observe() {
     if(!this.io.sense)return [];
     const snapshots=await this.io.sense(this.job.scope);let changed=queueFullScanIfDue(this.job,this.now());
-    if(this.io.libraryList && this.job.options.library)changed=queueLibraryScan(this.job,this.now())||changed;
+    if(this.io.libraryList && this.job.options.library && queueLibraryScan(this.job,this.now())){this.event('Scheduled Library inventory queued.','info','library');await this.save();}
     if(this.job.schedule?.enabled){this.job.schedule.lastTelemetryAt=this.now();this.job.schedule.observedTabs=snapshots.length;}
     if(changed)this.event('Scheduled full scan queued at its fixed deadline.');
     for(const s of snapshots){
@@ -164,7 +164,7 @@ export class Engine {
       s.nextCheckAt=this.now()+(successful?s.effectiveRecentIntervalMs:Math.max(60000,s.recentIntervalMs || 300000));this.job.phase=null;await this.save();await this.io.index?.(this.job);
   }
   async run() {
-    this.stopped=false;this.job.status='running';this.job.started=true;this.job.version=VERSION;await this.save();
+    this.stopped=false;this.libraryChecked=new Set();this.job.status='running';this.job.started=true;this.job.version=VERSION;await this.save();
     try {
       await this.reconcileInventory(await this.io.inventory?.(this.job.scope) || []);await this.observe();
       this.job.discoveryAudit ||= {round:0,baseline:Object.keys(this.job.entries).length,stable:false};let readsSincePage=0;
@@ -192,7 +192,11 @@ export class Engine {
         // Productive saved-file work should continue while an incomplete discovery route
         // is merely waiting for its retry time. Do not idle just to service verification.
         if(this.job.options.attachments!==false){const attachment=Object.values(this.job.entries).filter(e=>e.status==='saved' && (!e.attachmentScannedAt || e.attachmentPending) && (!e.attachmentRetryAt || e.attachmentRetryAt<=this.now())).sort((a,b)=>calendarTime(a)-calendarTime(b))[0];if(attachment){await this.processAttachments(attachment);continue;}}
-        if(this.io.libraryList && this.job.options.library){const work=libraryWork(this.job,this.now());if(work){await processLibrary(this,work);continue;}}
+        if(this.io.libraryList && this.job.options.library){
+          const saved=this.io.libraryVerify && Object.values(this.job.library?.entries || {}).find(f=>f.status==='saved'&&!this.libraryChecked.has(f.id));
+          if(saved){this.libraryChecked.add(saved.id);if(!await this.io.libraryVerify(saved)){saved.status='pending';saved.retryAt=0;this.event(`Library saved copy needs repair: ${saved.name}.`,'warn','library');await this.save();}continue;}
+          const work=libraryWork(this.job,this.now());if(work){await processLibrary(this,work);continue;}
+        }
         const waits=[...(indexOnly?[]:pending.map(e=>e.retryAt)),...(this.job.options.verify!==false?this.job.sources.filter(s=>s.error&&(s.failures || 0)<=2).map(s=>s.retryAt):[])].filter(Boolean);if (waits.length) {await this.wait(Math.min(...waits),'Waiting to revisit unresolved work after a quiet period…');continue;}
         const audit=this.job.discoveryAudit;
         if(this.job.options.verify!==false && this.job.sources.length && !this.job.sources.some(s=>s.error || !s.done) && !audit.stable){audit.stable=true;audit.verifiedAt=this.now();audit.round=0;this.event('Discovery traversal completed cleanly; skipped the old redundant full-list verification loop.');await this.save();}

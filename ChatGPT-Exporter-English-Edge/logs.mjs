@@ -12,7 +12,7 @@ export function appendEvent(job,message,at=Date.now(),level,category){
 }
 export function filterEvents(events,{search='',level='all',category='all',since=0}={}){
   const q=search.trim().toLocaleLowerCase();
-  return events.map(eventInfo).filter(e=>e.at>since&&(level==='all'||e.level===level)&&(category==='all'||e.category===category)&&(!q||`${e.message} ${e.category}`.toLocaleLowerCase().includes(q)));
+  return events.map(eventInfo).filter(e=>(e.lastAt || e.at)>since&&(level==='all'||e.level===level)&&(category==='all'||e.category===category)&&(!q||`${e.message} ${e.category}`.toLocaleLowerCase().includes(q)));
 }
 export function logText(events){return events.map(e=>`${new Date(e.at).toLocaleString()}  [${e.level.toUpperCase()} / ${e.category}] ${e.message}${e.repeated>1?` (×${e.repeated})`:''}`).join('\n');}
 export class LogPanel {
@@ -24,8 +24,8 @@ export class LogPanel {
     this.get('log-follow').addEventListener('change',()=>{this.follow=this.get('log-follow').checked;this.saveSettings();this.signature='';this.render();});
     this.get('log').addEventListener('scroll',()=>{const el=this.get('log');if(el.scrollHeight-el.scrollTop-el.clientHeight>35){this.follow=false;this.get('log-follow').checked=false;}});
     this.get('log-latest').onclick=()=>{this.follow=true;this.get('log-follow').checked=true;this.get('log').scrollTop=this.get('log').scrollHeight;this.saveSettings();};
-    this.get('log-pause').onclick=()=>{this.snapshot=this.snapshot?null:this.events.slice();this.signature='';this.render();};
-    this.get('log-clear').onclick=()=>{this.since=this.events.at(-1)?.at || 0;this.signature='';this.render();};
+    this.get('log-pause').onclick=()=>{this.snapshot=this.snapshot?null:this.events.map(e=>({...e}));this.signature='';this.render();};
+    this.get('log-clear').onclick=()=>{this.since=this.events.at(-1)?.lastAt || this.events.at(-1)?.at || 0;this.signature='';this.render();};
     this.get('log-reset').onclick=()=>{this.since=0;this.snapshot=null;for(const id of ['log-search','log-level','log-category'])this.get(id).value=id==='log-search'?'':'all';this.signature='';this.saveSettings();this.render();};
     this.get('log-copy').onclick=()=>navigator.clipboard.writeText(logText(this.filtered())).then(()=>this.feedback('Visible events copied.'),this.onError);
     this.get('log-save').onclick=()=>this.download(new Blob([logText(this.filtered())],{type:'text/plain'}),'chatgpt-exporter-visible-log.txt');
@@ -39,7 +39,7 @@ export class LogPanel {
   render(){
     const events=this.filtered(),text=logText(events),signature=JSON.stringify([text,!!this.snapshot]);
     if(this.signature!==signature){const el=this.get('log'),top=el.scrollTop;el.textContent=text;el.scrollTop=this.follow?el.scrollHeight:top;this.signature=signature;}
-    const unseen=this.snapshot?Math.max(0,this.events.filter(e=>e.at>(this.snapshot.at(-1)?.at || 0)).length):0;
+    const unseen=this.snapshot?Math.max(0,this.events.reduce((n,e,i)=>n+Math.max(0,(e.repeated || 1)-(this.snapshot[i]?.repeated || (this.snapshot[i]?1:0))),0)):0;
     this.get('log-summary').textContent=`${events.length} shown / ${this.events.length} retained${this.snapshot?` · display paused · ${unseen} new`:''}${this.since?' · earlier events hidden':''}`;
     this.get('log-pause').textContent=this.snapshot?'Resume log display':'Pause log display';
   }

@@ -1,24 +1,34 @@
 # ChatGPT Exporter — English Autopilot for Microsoft Edge
 
-**Version 2.4.0 · October 2, 2026**
+**Version 2.4.1 · October 2, 2026**
 
 Build a local backup of the conversations available to your signed-in ChatGPT web session. The extension discovers active, archived and project chats, writes conversation JSON and readable Markdown, tracks revisions, and backs up eligible attachments. Your backup stays in the folder you select.
 
-[Download v2.4.0](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.0) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
+[Download v2.4.1](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.1) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-## What changed in v2.4.0
+## Library files in your Viewer
+
+Use [Offline Chat Viewer 1.1.4](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/tag/v1.1.4), select this backup's root folder, then open **Files & Library**. It reads `conversation-index.json` and `attachments/library-index.json`, opens saved files and their source chats, and filters files for the selected conversation. For files at or above **10,000,000 bytes**, use the ChatGPT link to download them yourself, then **Import downloaded copy** in the Viewer. The Viewer copies a size-checked file into its expected backup path and keeps any existing copy. Importing a file does not rebuild message indexes.
+
+v2.4.1 also preserves complete metadata during sparse observations, resumes pagination with bounded retries, checks existing Library copies on resume, cancels oversized streams, honors Stop/hold between chunks, batches changing catalogs and skips unchanged catalog writes. Manual catalogs include the expected backup path. Paused logs freeze duplicate counters, and new repeated notices remain visible after clearing the view.
+
+Keep the exporter dashboard and signed-in ChatGPT tab open for passive checks. Quiet recent-chat polling gradually backs off; new activity resets it. Full discovery and Library scans retain their fixed deadlines. Offline periods and cooldowns preserve the queue.
+
+Validation: **54 exporter tests**, **162 Viewer backend tests**, and an isolated Edge integration check covering Stop/resume, exact 10 MB manual handling, actual exporter catalogs, manual import, source-chat navigation and intact saved-file bytes. ChatGPT website responses were simulated; live-account Library/API compatibility remains unverified.
+
+## What changed in v2.4.1
 
 - ChatGPT Library backup: catalog files and folders, then automatically save all file types strictly below **10,000,000 bytes**. The exact 10 MB boundary and larger files are listed for manual download.
 - Stable file IDs keep duplicate filenames separate. Known local files are reused, downloaded bytes are hashed, and transient failures get bounded retries.
 - Library work shares adaptive pacing and yields to chat updates. Changed conversations get priority; quiet watcher checks can stretch to 30 minutes, while full scans retain their deadline. Offline network work waits for connectivity.
 - Activity controls: search, level/category filters, pause display, follow new events, jump to latest, clear view, reset, copy, TXT and JSON exports. Up to 1,500 events are retained; repeated notices are coalesced.
-- Viewer-compatible native conversation JSON and index paths, plus a versioned file catalog and handoff manifest for your viewer's future file interface.
+- Viewer-compatible native conversation JSON and index paths, plus a versioned file catalog and handoff manifest for the Viewer Files & Library interface.
 
-The same-folder upgrade retains queue/cache state. Library automatic backup and adaptive watcher checks can each be switched off. Detailed notes: `CHANGELOG-v2.4.0.md`.
+The same-folder upgrade retains queue/cache state. Library automatic backup and adaptive watcher checks can each be switched off. Detailed notes: `CHANGELOG-v2.4.1.md`.
 
 ## Install in Edge
 
-1. Download **ChatGPT-Exporter-English-Edge-v2.4.0.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
+1. Download **ChatGPT-Exporter-English-Edge-v2.4.1.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
 2. Extract the ZIP to a permanent folder. Inside it, find `ChatGPT-Exporter-English-Edge`, which contains `manifest.json`.
 3. Open `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
 4. Open the exporter dashboard from the extension. Connect to the intended signed-in ChatGPT account and workspace.
@@ -100,7 +110,7 @@ Saved files use `attachments/library/<stable-file-id>/<original-name>`, so ident
 
 Point your **kitomisaitichi-design/chatgpt-viewer** at the complete backup folder, keeping `conversation-index.json`, `json/`, `markdown/` and `attachments/` together. Existing native conversation JSON, branches, IDs, timestamps, classifications and basenames keep their format. The conversation index attaches Library files where a source conversation ID is available. Unlinked Library files stay in the file catalog; they are not invented conversations.
 
-The viewer can continue importing conversations through its existing index/native-JSON importer. The new `chatgpt-exporter-viewer/v1` and `chatgpt-library-index/v1` manifests expose Library metadata for its future file browser. This release updates the exporter; it does not add a new Library interface to the viewer application. Open the saved HTML catalog now to browse files locally. The cached-chat ZIP remains a transcript export; compress the full backup folder to include saved Library binaries.
+Viewer 1.1.4 reads the native conversation index and Library file catalog together. Use its Files & Library panel to browse local files and import manual downloads. The saved HTML catalogs remain available without the Viewer. The cached-chat ZIP remains a transcript export; compress the full backup folder to include Library binaries.
 
 ## Activity controls
 
@@ -114,9 +124,7 @@ Discovery depends on the conversations exposed by the enabled ChatGPT website ro
 
 ## Validation
 
-All **41 focused tests passed**, including the existing 35 regression tests. Runtime syntax and release package checks passed. An isolated Edge 154 smoke run with simulated website responses verified extension startup, a five-byte Library file saved and hashed, an exact 10 MB file listed without a download request, manual filtering, and log search/pause/reset.
-
-Extended tests were deferred at the user's request to conserve compute: large unknown-length streams, diverse live Library schemas, folder/pagination variants, interruptions and resume, offline transitions, adaptive interval timing, and end-to-end viewer file-browser integration. No live-account Library download is claimed. Previous v2.3.9 browser checks are historical evidence, not validation of these new features.
+All **54 exporter regression tests** and **162 Viewer backend tests** passed. Runtime syntax and package checks passed. Isolated Microsoft Edge 154 integration verified small-file download and hashing, exact 10 MB manual handling, Stop/resume during chunk transfer, real exporter catalog ingestion, a manual file import, byte-identical saved-file download, source-chat navigation, selected-chat filtering and activity controls. Simulated response tests also cover nested folders, pagination, transient retries, sparse observations, oversize streams, catalog batching and missing saved-copy repair. Live-account Library/API compatibility remains unverified.
 
 ## License and attribution
 
