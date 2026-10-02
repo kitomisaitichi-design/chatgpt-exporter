@@ -1,29 +1,24 @@
 # ChatGPT Exporter — English Autopilot for Microsoft Edge
 
-**Version 2.3.9 · October 1, 2026**
+**Version 2.4.0 · October 2, 2026**
 
 Build a local backup of the conversations available to your signed-in ChatGPT web session. The extension discovers active, archived and project chats, writes conversation JSON and readable Markdown, tracks revisions, and backs up eligible attachments. Your backup stays in the folder you select.
 
-[Download v2.3.9](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.3.9) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
+[Download v2.4.0](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.0) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-## What changed in v2.3.9
+## What changed in v2.4.0
 
-The dashboard now puts backup progress and run controls first, with account and folder setup alongside them on wide screens. Watcher settings, backup scope, recovery tools, portable state and activity have their own labeled panels.
+- ChatGPT Library backup: catalog files and folders, then automatically save all file types strictly below **10,000,000 bytes**. The exact 10 MB boundary and larger files are listed for manual download.
+- Stable file IDs keep duplicate filenames separate. Known local files are reused, downloaded bytes are hashed, and transient failures get bounded retries.
+- Library work shares adaptive pacing and yields to chat updates. Changed conversations get priority; quiet watcher checks can stretch to 30 minutes, while full scans retain their deadline. Offline network work waits for connectivity.
+- Activity controls: search, level/category filters, pause display, follow new events, jump to latest, clear view, reset, copy, TXT and JSON exports. Up to 1,500 events are retained; repeated notices are coalesced.
+- Viewer-compatible native conversation JSON and index paths, plus a versioned file catalog and handoff manifest for your viewer's future file interface.
 
-- A clearer dark layout, compact navigation and responsive spacing.
-- Six counters, saved-chat totals and percentage, and visible attention indicators.
-- Clear headings and colors for exporting, watching, waiting, paused, held, complete and error states.
-- Visible Connecting feedback, account/folder readiness and concise account labels.
-- Separate recent-check and full-discovery selectors, with watcher enable/off feedback.
-- Keyboard focus indicators, form labels and reduced-motion support.
-
-This is a dashboard update. Conversation retrieval, attachment handling, saved queue/cache, adaptive pacing and v2.3.8 watcher scheduling retain their working behavior. The same-folder upgrade retains your progress.
-
-Detailed change notes are included as `CHANGELOG-v2.3.9.md` inside the extension folder.
+The same-folder upgrade retains queue/cache state. Library automatic backup and adaptive watcher checks can each be switched off. Detailed notes: `CHANGELOG-v2.4.0.md`.
 
 ## Install in Edge
 
-1. Download **ChatGPT-Exporter-English-Edge-v2.3.9.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
+1. Download **ChatGPT-Exporter-English-Edge-v2.4.0.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
 2. Extract the ZIP to a permanent folder. Inside it, find `ChatGPT-Exporter-English-Edge`, which contains `manifest.json`.
 3. Open `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
 4. Open the exporter dashboard from the extension. Connect to the intended signed-in ChatGPT account and workspace.
@@ -84,6 +79,33 @@ Changed conversations update their existing JSON/Markdown basenames and record r
 
 To move a backup to another installation, copy the whole backup folder, connect to the same account/workspace, select that folder, and import `portable-state.json`. Portable state contains queue metadata rather than full conversation bodies; the copied JSON files provide those bodies. Preserve a copy of your backup before uninstalling or clearing browser data.
 
+## ChatGPT Library
+
+Leave **Auto backup** enabled in the Library panel. Library discovery and file work run after ready chat work; **Scan Library / resume** starts a scan or resumes its saved queue. Folder/list pagination and error states remain in portable state. Library inventory refreshes every three hours while the passive watcher is enabled. Library failures do not convert saved transcripts into failed chats.
+
+The Library limit uses decimal MB: **strictly less than 10,000,000 bytes**. Known larger files are listed immediately; unknown-size streams are bounded and stopped when they exceed the limit. This differs from the older document-attachment feature's inclusive 10 MiB limit. Large files are never automatically downloaded by the Library worker.
+
+Use **10 MB or larger** to filter the dashboard, or **Save manual-download list** for a portable HTML list. Open the listed Library folder/source chat, find the filename and ID, and download it through ChatGPT. The manual list also records unavailable and permission-limited files for inspection. It opens ChatGPT pages rather than retaining expiring signed download URLs. Scanning supports known Library nodes and the Library query route; an unfamiliar response, repeated page or early end is reported as incomplete.
+
+Saved files use `attachments/library/<stable-file-id>/<original-name>`, so identical filenames do not overwrite one another. Matching existing small files are reused where size/name and uniqueness permit it. **Retry unavailable files** explicitly reopens unavailable/transient file work; known files at the size boundary remain manual.
+
+| Output | Purpose |
+| --- | --- |
+| `attachments/library-index.json` | Versioned file IDs, names, byte sizes, status, relative paths, SHA-256 and source chat IDs |
+| `attachments/library-catalog.html` | Offline all-file catalog with links to saved files |
+| `attachments/manual-downloads.html` / `.json` | Manual/unfinished items and links to their ChatGPT folder/source |
+| `viewer-handoff.json` | Conversation source paths, linked files and Library inventory for viewer integration |
+
+## Offline viewer interoperability
+
+Point your **kitomisaitichi-design/chatgpt-viewer** at the complete backup folder, keeping `conversation-index.json`, `json/`, `markdown/` and `attachments/` together. Existing native conversation JSON, branches, IDs, timestamps, classifications and basenames keep their format. The conversation index attaches Library files where a source conversation ID is available. Unlinked Library files stay in the file catalog; they are not invented conversations.
+
+The viewer can continue importing conversations through its existing index/native-JSON importer. The new `chatgpt-exporter-viewer/v1` and `chatgpt-library-index/v1` manifests expose Library metadata for its future file browser. This release updates the exporter; it does not add a new Library interface to the viewer application. Open the saved HTML catalog now to browse files locally. The cached-chat ZIP remains a transcript export; compress the full backup folder to include saved Library binaries.
+
+## Activity controls
+
+Filter messages by search text, severity or category. **Pause log display** freezes only the displayed events; backups continue. Scrolling away from the bottom turns following off; **Jump to latest** resumes it. **Clear view** hides earlier events without deleting queue history, and **Show all / reset** restores them. Copy/TXT exports use the visible filter; full JSON exports use the retained history. Filters/follow preferences persist in the extension.
+
 ## Privacy and limits
 
 The extension has no external analytics or upload backend. Authentication stays in the signed-in ChatGPT page; bearer tokens are not stored in the extension's IndexedDB or exported state. Backups and portable state contain private conversation information, so keep them separate from public source repositories and release uploads.
@@ -92,9 +114,9 @@ Discovery depends on the conversations exposed by the enabled ChatGPT website ro
 
 ## Validation
 
-All **35 focused tests passed**. Additional Edge dashboard checks verified busy connection feedback, setup readiness, original control IDs, watcher toggling, recovery/manual-link controls, visual status states and six viewport widths from 320 to 1440 pixels without horizontal overflow. Isolated Microsoft Edge 154 tests with simulated website responses checked automatic discovery of a server-only new chat, remotely changed conversations, completed streamed replies with unchanged timestamps, stable full-scan scheduling, overdue scans, Stop/Start/reload, watcher health and attachment recovery. Archive integrity, manifest assets, module imports and runtime syntax were also checked.
+All **41 focused tests passed**, including the existing 35 regression tests. Runtime syntax and release package checks passed. An isolated Edge 154 smoke run with simulated website responses verified extension startup, a five-byte Library file saved and hashed, an exact 10 MB file listed without a download request, manual filtering, and log search/pause/reset.
 
-The historical 52-test suite previously retained the same 22 failing test names between v2.3.6 and v2.3.8. The focused tests and browser checks above are the validation for this UI update. These checks do not establish attachment availability or watcher behavior on a particular live ChatGPT account.
+Extended tests were deferred at the user's request to conserve compute: large unknown-length streams, diverse live Library schemas, folder/pagination variants, interruptions and resume, offline transitions, adaptive interval timing, and end-to-end viewer file-browser integration. No live-account Library download is claimed. Previous v2.3.9 browser checks are historical evidence, not validation of these new features.
 
 ## License and attribution
 

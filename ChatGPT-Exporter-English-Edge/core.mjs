@@ -1,4 +1,4 @@
-export const VERSION = '2.3.9';
+export const VERSION = '2.4.0';
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const freshPace = () => ({delay:5000, floor:5000, next:0, until:0, strikes:0, ok:0, recent:[], lastLimit:0, tier:0, tierChangedAt:0, idleRelaxAt:0, stableSince:0, regimes:[]});
 // Tiers are the network cadence. Local disk/cache work never consumes these delays.
@@ -119,7 +119,7 @@ export function markdown(data, id) {
   return lines.join('\n');
 }
 export function newJob(scope, options={}, now = Date.now()) {
-  const merged={archived:true,projects:true,assist:false,verify:true,mode:'index-first',attachments:true,passive:true,passiveHours:3,yieldUser:true,...options};
+  const merged={archived:true,projects:true,assist:false,verify:true,mode:'index-first',attachments:true,passive:true,passiveHours:3,yieldUser:true,library:true,smartWatch:true,...options};
   return {version:VERSION, scope, created:now, updated:now, status:'ready', message:'Ready', options:merged, entries:{}, sources:[
     {key:'active', kind:'list', offset:0, done:false, seenPages:[], emptyChecks:0},
     ...(merged.archived ? [{key:'archived', kind:'list', offset:0, archived:true, done:false, seenPages:[], emptyChecks:0}] : []),

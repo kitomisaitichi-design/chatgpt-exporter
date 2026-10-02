@@ -1,3 +1,4 @@
+import {libraryWork} from './library.mjs';
 import {counts,epoch,newJob} from './core.mjs';
 export const RECENT_CHECK_MS=5*60000;
 export function ensureWatchSchedule(job,now=Date.now()){
@@ -33,7 +34,7 @@ export function hasReadyWork(job,now=Date.now()){
   if(job.sources?.some(s=>!s.done&&!s.error || s.error&&(s.failures || 0)<=2&&(s.retryAt || 0)<=now && job.options.verify!==false))return true;
   const entries=Object.values(job.entries || {});
   if(job.options.mode!=='index-only' && entries.some(e=>e.status==='pending'&&(e.retryAt || 0)<=now))return true;
-  return job.options.attachments!==false && entries.some(e=>e.status==='saved'&&(!e.attachmentScannedAt || e.attachmentPending)&&(e.attachmentRetryAt || 0)<=now);
+  return !!(job.options.library && libraryWork(job,now)) || job.options.attachments!==false && entries.some(e=>e.status==='saved'&&(!e.attachmentScannedAt || e.attachmentPending)&&(e.attachmentRetryAt || 0)<=now);
 }
 export function hasObservedWork(job,snapshots){
   return snapshots.some(s=>(s.hints || []).some(h=>!job.entries[h.id] || epoch(h.update_time)>Math.max(epoch(job.entries[h.id].update_time),epoch(job.entries[h.id].checkedUpdateTime))) || (s.changedBodies || []).some(h=>h.contentHash && h.contentHash!==job.entries[h.id]?.contentHash && h.contentHash!==job.entries[h.id]?.observedBodyHash) || (s.changedChats || []).some(h=>h.revision && h.revision!==job.entries[h.id]?.nativeWriteRevision));

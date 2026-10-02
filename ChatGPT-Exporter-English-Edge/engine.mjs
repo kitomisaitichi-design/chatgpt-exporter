@@ -1,22 +1,26 @@
+import {libraryState,queueLibraryScan,libraryWork,processLibrary,mergeLibraryItem,normalizeLibraryItem} from './library.mjs';
+import {appendEvent} from './logs.mjs';
 import {VERSION,WEEKLY_BROKEN_MS,counts, limited, succeeded, relaxIdle, sourcePath, ingestPage, conversationValid, safeName, markdown,mergeEntry,validId,calendarTime,conversationTime,classifyConversation,extractAttachments,epoch} from './core.mjs';
 import {awareness,observeActivity,decide,recordAction,recordLimit,recordSuccess} from './awareness.mjs';
 import {mergeInventoryAttachments,ATTACHMENT_STATE_REVISION} from './attachment-state.mjs';
 import {watchCheckDue,queueFullScanIfDue,recentWatchSources,ensureWatchSchedule} from './watch.mjs';
-export class Paused extends Error {}
-export class YieldAttachments extends Error {}
+export class Paused extends Error {constructor(...args){super(...args);this.name='Paused';}}
+export class YieldAttachments extends Error {constructor(...args){super(...args);this.name='YieldAttachments';}}
 export class RequestError extends Error {constructor(status, message) {super(message || `ChatGPT returned HTTP ${status}`);this.status=status;}}
 export class Engine {
   constructor(job, io) {this.job=job;this.io=io;this.stopped=false;this.held=false;this.cachedIds=new Set();this.now=io.now || Date.now;this.sleep=io.sleep || (ms=>new Promise(r=>setTimeout(r,ms)));}
   async save() {this.job.updated=this.now();await this.io.save(this.job);this.io.changed?.(this.job);}
   async holdPoint(){while(this.held){if(this.stopped)throw new Paused('Paused by you.');await this.sleep(400);}if(this.stopped)throw new Paused('Paused by you.');}
-  event(message) {this.job.events.push({at:this.now(),message});this.job.events=this.job.events.slice(-180);}
+  event(message,level,category) {appendEvent(this.job,message,this.now(),level,category);}
   async wait(until, label) {while (this.now()<until) {await this.holdPoint();this.job.message=label;this.io.changed?.(this.job);await this.sleep(Math.min(1000,until-this.now()));}await this.holdPoint();}
   async observe() {
     if(!this.io.sense)return [];
     const snapshots=await this.io.sense(this.job.scope);let changed=queueFullScanIfDue(this.job,this.now());
+    if(this.io.libraryList && this.job.options.library)changed=queueLibraryScan(this.job,this.now())||changed;
     if(this.job.schedule?.enabled){this.job.schedule.lastTelemetryAt=this.now();this.job.schedule.observedTabs=snapshots.length;}
     if(changed)this.event('Scheduled full scan queued at its fixed deadline.');
     for(const s of snapshots){
+      if(this.io.libraryList && this.job.options.library)for(const raw of s.libraryItems || []){const item=normalizeLibraryItem(raw);if(item)changed=mergeLibraryItem(libraryState(this.job),item,this.now())||changed;}
       for(const c of s.captured || [])this.cachedIds.add(c.id);
       for(const item of s.hints || [])changed=mergeEntry(this.job,item)||changed;
       for(const item of s.changedChats || []){
@@ -39,6 +43,7 @@ export class Engine {
     const limit=observeActivity(this.job,snapshots,this.now());
     if(limit){this.job.lastLimitSeen=limit.at;limited(this.job.pace,limit.retryAfter,this.now(),Math.random(),'app');recordLimit(this.job);this.event(`Observed a ChatGPT limit signal; adaptive pacing stepped up to tier ${this.job.pace.tier || 0}.`);await this.save();}
     else {const before=this.job.pace.tier || 0;if(relaxIdle(this.job.pace,this.now()) && (this.job.pace.tier || 0)<before){this.event(`Quiet-time decay stepped pacing down to tier ${this.job.pace.tier}.`);await this.save();}}
+    if(changed && this.job.schedule?.enabled){this.job.schedule.quietChecks=0;this.job.schedule.effectiveRecentIntervalMs=this.job.schedule.recentIntervalMs || 300000;}
     if(changed){if(this.job.status==='complete' || this.job.status==='indexed')this.job.status='ready';await this.save();await this.io.index?.(this.job);}
     return snapshots;
   }
@@ -61,6 +66,7 @@ export class Engine {
     const a=awareness(this.job),waitingSince=this.now();
     for(;;){
       await this.holdPoint();
+      if(this.io.online && !this.io.online()){a.state='offline';a.reason='Internet connection is offline. Local progress is safe; network work resumes when online.';a.waitUntil=this.now()+30000;await this.wait(a.waitUntil,a.reason);continue;}
       const snapshots=await this.observe(),decision=decide(this.job,snapshots,kind,this.now(),waitingSince);
       if(kind==='asset' && (Object.values(this.job.entries).some(e=>e.status==='pending' && (!e.retryAt || e.retryAt<=this.now())) || this.job.sources.some(s=>!s.done&&!s.error)))throw new YieldAttachments('Attachment wait yielded to queued chat updates.');
       a.state=decision.state;a.reason=decision.reason;a.waitUntil=decision.until;this.job.message=decision.reason;this.io.changed?.(this.job);
@@ -146,13 +152,16 @@ export class Engine {
   }
   async checkRecentChats(){
     const s=ensureWatchSchedule(this.job,this.now());s.lastCheckAttemptAt=this.now();s.checkState='checking';this.job.phase='watch';
-    const before=Object.keys(this.job.entries).length;let pages=0;
+    const before=Object.keys(this.job.entries).length,pendingBefore=Object.values(this.job.entries).filter(e=>e.status==='pending').length;let pages=0,successful=false;
     try{
       for(const source of recentWatchSources(this.job)){const data=await this.request(sourcePath(source));ingestPage(this.job,source,data);pages++;await this.save();}
-      s.lastCheckAt=this.now();s.checkState='current';s.checkError=null;
+      s.lastCheckAt=this.now();s.checkState='current';s.checkError=null;s.checkWaitUntil=0;successful=true;
       this.event(`Automatic recent-chat check: ${pages} metadata pages checked; ${Object.keys(this.job.entries).length-before} new chat links indexed.`);
     }catch(e){if(e instanceof Paused)throw e;s.checkState='deferred';s.checkError=e.message;this.event(`Automatic recent-chat check deferred: ${e.message}`);}
-    s.nextCheckAt=this.now()+(s.recentIntervalMs || 300000);this.job.phase=null;await this.save();await this.io.index?.(this.job);
+    const activity=Object.keys(this.job.entries).length>before || Object.values(this.job.entries).filter(e=>e.status==='pending').length>pendingBefore;
+      s.quietChecks=successful?(activity?0:Math.min(3,(s.quietChecks || 0)+1)):0;
+      s.effectiveRecentIntervalMs=this.job.options.smartWatch===false?(s.recentIntervalMs || 300000):Math.min(1800000,(s.recentIntervalMs || 300000)*2**s.quietChecks);
+      s.nextCheckAt=this.now()+(successful?s.effectiveRecentIntervalMs:Math.max(60000,s.recentIntervalMs || 300000));this.job.phase=null;await this.save();await this.io.index?.(this.job);
   }
   async run() {
     this.stopped=false;this.job.status='running';this.job.started=true;this.job.version=VERSION;await this.save();
@@ -163,9 +172,9 @@ export class Engine {
         await this.holdPoint();await this.observe();
         const pending=Object.values(this.job.entries).filter(e=>e.status==='pending'),eligible=pending.filter(e=>!e.retryAt || e.retryAt<=this.now()).sort((a,b)=>calendarTime(a)-calendarTime(b) || String(a.id).localeCompare(String(b.id)));
         const indexOnly=this.job.options.mode==='index-only',indexFirst=this.job.options.mode==='index-first';
-        const ready=indexOnly?null:eligible.find(e=>this.cachedIds.has(e.id)&&!e.refresh) || eligible.find(e=>!e.recoveryPending) || eligible[0];
+        const urgentReady=eligible.find(e=>e.refresh && (e.nativeWriteAt || e.changeReason)),ready=indexOnly?null:urgentReady || eligible.find(e=>this.cachedIds.has(e.id)&&!e.refresh) || eligible.find(e=>!e.recoveryPending) || eligible[0];
         const source=this.job.sources.filter(s=>!s.done && !s.error).sort((a,b)=>(a.lastPageAt || 0)-(b.lastPageAt || 0))[0],localReady=ready && this.cachedIds.has(ready.id) && !ready.refresh;
-        if (ready && (!source || localReady || !indexFirst && readsSincePage<3)) {
+        if (ready && (!source || localReady || urgentReady===ready || !indexFirst && readsSincePage<3)) {
           try{await this.process(ready);}catch(error){
             if(error instanceof Paused || ['NotAllowedError','SecurityError','QuotaExceededError'].includes(error.name))throw error;
             ready.attempts=(ready.attempts || 0)+1;ready.status=ready.attempts>=3?'failed':'pending';ready.retryAt=ready.status==='pending'?this.now()+60000*ready.attempts:0;ready.error=error.message || String(error);this.job.phase=null;
@@ -183,6 +192,7 @@ export class Engine {
         // Productive saved-file work should continue while an incomplete discovery route
         // is merely waiting for its retry time. Do not idle just to service verification.
         if(this.job.options.attachments!==false){const attachment=Object.values(this.job.entries).filter(e=>e.status==='saved' && (!e.attachmentScannedAt || e.attachmentPending) && (!e.attachmentRetryAt || e.attachmentRetryAt<=this.now())).sort((a,b)=>calendarTime(a)-calendarTime(b))[0];if(attachment){await this.processAttachments(attachment);continue;}}
+        if(this.io.libraryList && this.job.options.library){const work=libraryWork(this.job,this.now());if(work){await processLibrary(this,work);continue;}}
         const waits=[...(indexOnly?[]:pending.map(e=>e.retryAt)),...(this.job.options.verify!==false?this.job.sources.filter(s=>s.error&&(s.failures || 0)<=2).map(s=>s.retryAt):[])].filter(Boolean);if (waits.length) {await this.wait(Math.min(...waits),'Waiting to revisit unresolved work after a quiet period…');continue;}
         const audit=this.job.discoveryAudit;
         if(this.job.options.verify!==false && this.job.sources.length && !this.job.sources.some(s=>s.error || !s.done) && !audit.stable){audit.stable=true;audit.verifiedAt=this.now();audit.round=0;this.event('Discovery traversal completed cleanly; skipped the old redundant full-list verification loop.');await this.save();}
