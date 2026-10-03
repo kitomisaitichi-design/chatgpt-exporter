@@ -1,6 +1,6 @@
 // Same-origin/read-only ChatGPT bridge. Authentication remains inside ChatGPT.
 (() => {
-  if (window.__englishExporterBridgeV243) return;
+  if (window.__englishExporterBridgeV244) return;
   const originalFetch = window.fetch.bind(window);
   const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map(), changedChats=new Map(), libraryItems=new Map(),libraryRoutes=new Map();
   const documentId=crypto.randomUUID(), loadedAt=Date.now();
@@ -119,7 +119,7 @@
         if(lastPath!==location.pathname){lastPath=location.pathname;routeAt=Date.now();}const scope=snapshotScope();const current=location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/);if(current)hint({id:current[1]},scope,'open chat URL');
         for(const link of document.querySelectorAll('a[href]')) {try {const u=new URL(link.getAttribute('href'),location.origin);if(u.origin!==location.origin)continue;const m=u.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/);if(m)hint({id:m[1],title:link.textContent?.trim().slice(0,300)},scope,'visible app link');} catch {}}
         const challenge=!!document.querySelector('iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/"]') || /^just a moment\.{0,3}$/i.test(document.title.trim()),links=[...hints.values()].filter(scoped);
-        return {ok:true,status:200,verified,documentId,loadedAt,routeAt,readyState:document.readyState,inFlight,activeStreams,lastStart,lastWrite,lastUserInteraction,events:events.filter(e=>Date.now()-e.at<300000),blocked:challenge?'A browser check is visible. Complete it in the ChatGPT tab, then resume.':blocked,limit:verified&&scoped(lastLimit)?lastLimit:null,hints:verified?links.map(({scope,...h})=>h):links.filter(h=>['open chat URL','visible app link'].includes(h.origin)).map(h=>({id:h.id,origin:'open-tab link (server access checked on retrieval)'})),projects:verified?[...projects.values()].filter(scoped).map(({scope,...p})=>p):[],captured:verified?[...captured.entries()].filter(([,v])=>scoped(v)).map(([id,v])=>({id,at:v.at})):[],changedChats:verified?[...changedChats.values()].filter(scoped).map(({scope,...v})=>v):[],libraryItems:verified?[...libraryItems.values()].filter(scoped).map(v=>v.item):[],fileRoutes:verified?[...fileRoutes.values()].filter(scoped).map(({scope,...r})=>r):[]};
+        return {ok:true,status:200,verified,documentId,loadedAt,routeAt,readyState:document.readyState,inFlight,activeStreams,lastStart,lastWrite,lastUserInteraction,events:events.filter(e=>Date.now()-e.at<300000),blocked:challenge?'A browser check is visible. Complete it in the ChatGPT tab, then resume.':blocked,limit:verified&&scoped(lastLimit)?lastLimit:null,hints:verified?links.map(({scope,...h})=>h):links.filter(h=>['open chat URL','visible app link'].includes(h.origin)).map(h=>({id:h.id,origin:'open-tab link (server access checked on retrieval)'})),projects:verified?[...projects.values()].filter(scoped).map(({scope,...p})=>p):[],captured:verified?[...captured.entries()].filter(([,v])=>scoped(v)).map(([id,v])=>({id,at:v.at})):[],changedChats:verified?[...changedChats.values()].filter(scoped).map(({scope,...v})=>v):[],libraryObservations:verified?[...libraryItems.values()].filter(scoped).map(v=>({item:v.item,at:v.at})):[],libraryItems:verified?[...libraryItems.values()].filter(scoped).map(v=>v.item):[],fileRoutes:verified?[...fileRoutes.values()].filter(scoped).map(({scope,...r})=>r):[]};
       }
       if(args.op==='cached'){if(!matches(args.scope))return {ok:false,status:409};const entry=captured.get(args.id);return entry && scoped(entry) ? {ok:true,status:200,data:entry.data,at:entry.at} : {ok:true,status:204};}
       if (args.op === 'context') {await session(true);return {ok:true, scope:snapshotScope(), status:200};}
@@ -157,10 +157,9 @@
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV243',{value:{rpc,version:'2.4.3'}, configurable:false,writable:false});
-  if(!window.__englishExporterBridgeV242)Object.defineProperty(window,'__englishExporterBridgeV242',{value:window.__englishExporterBridgeV243});
-  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV243});
-  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV243});
+  Object.defineProperty(window,'__englishExporterBridgeV244',{value:{rpc,version:'2.4.4'}, configurable:false,writable:false});
+  if(!window.__englishExporterBridgeV243)Object.defineProperty(window,'__englishExporterBridgeV243',{value:window.__englishExporterBridgeV244});
+  if(!window.__englishExporterBridgeV242)Object.defineProperty(window,'__englishExporterBridgeV242',{value:window.__englishExporterBridgeV244});
+  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV244});
+  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV244});
 })();
-
-

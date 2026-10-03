@@ -1,3 +1,4 @@
+import {retainedFileRows} from './file-links.mjs';
 import {libraryIndex,LIBRARY_FAILURE_LIMIT} from './library.mjs';
 import {analyzeFiles} from './file-intelligence.mjs';
 import {epoch} from './core.mjs';
@@ -5,7 +6,7 @@ import {epoch} from './core.mjs';
 export const fileSize=n=>n==null?'Unknown size':n<1000?n+' B':n<1_000_000?(n/1000).toFixed(1)+' KB':(n/1_000_000).toFixed(2)+' MB';
 const sourceDate=value=>new Date(typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)?value+'T12:00:00':epoch(value));
 export function selectLibraryFiles(files,{search='',filter='all',sort='recent',page=0,pageSize=50}={}) {
-  const analysis=analyzeFiles(files),q=search.trim().toLocaleLowerCase(),selected=files.filter(f=>(!q||(f.name+' '+f.id).toLocaleLowerCase().includes(q)) && (filter==='all' || filter==='duplicates'&&(analysis.get(f.id)?.duplicate || f.duplicate) || filter==='versions'&&analysis.get(f.id)?.version || filter==='preferred'&&analysis.get(f.id)?.version?.role==='preferred' || filter==='images-off'&&f.imageExcluded || filter==='manual'&&f.status==='manual' || filter==='saved'&&f.status==='saved' || filter==='parked'&&f.parked || filter==='pending'&&['pending','deferred'].includes(f.status)&&!f.parked || filter==='attention'&&!['saved','manual'].includes(f.status)));
+  const analysis=analyzeFiles(files),q=search.trim().toLocaleLowerCase(),selected=files.filter(f=>(!q||(f.name+' '+f.id).toLocaleLowerCase().includes(q)) && (filter==='all' || filter==='both'&&new Set((f.sourceRefs || []).map(r=>r.kind)).size===2 || filter==='chat-only'&&(f.sourceRefs || []).some(r=>r.kind==='chat')&&!(f.sourceRefs || []).some(r=>r.kind==='library') || filter==='retained'&&(f.sourceRefs || []).some(r=>r.presence!=='observed') || filter==='duplicates'&&(analysis.get(f.id)?.duplicate || f.duplicate) || filter==='versions'&&analysis.get(f.id)?.version || filter==='preferred'&&analysis.get(f.id)?.version?.role==='preferred' || filter==='images-off'&&f.imageExcluded || filter==='manual'&&f.status==='manual' || filter==='saved'&&f.status==='saved' || filter==='parked'&&f.parked || filter==='pending'&&['pending','deferred'].includes(f.status)&&!f.parked || filter==='attention'&&!['saved','manual'].includes(f.status)));
   selected.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='size'?(b.size??-1)-(a.size??-1):sort==='status'?a.status.localeCompare(b.status)||a.name.localeCompare(b.name):(epoch(b.updated)||epoch(b.uploaded)||epoch(b.created))-(epoch(a.updated)||epoch(a.uploaded)||epoch(a.created))||a.name.localeCompare(b.name));
   const size=pageSize==='all'?Math.max(1,selected.length):Math.max(1,Number(pageSize)||50),pages=Math.max(1,Math.ceil(selected.length/size)),current=Math.max(0,Math.min(pages-1,page));
   return {files:selected.slice(current*size,(current+1)*size),total:selected.length,page:current,pages,start:selected.length?current*size+1:0,end:Math.min(selected.length,(current+1)*size)};
@@ -23,7 +24,7 @@ export class LibraryPanel {
   node(tag,className,text){const n=this.doc.createElement(tag);if(className)n.className=className;if(text!=null)n.textContent=text;return n;}
   update(job,controls={}){this.job=job;this.controls=controls;this.render();}
   render(){
-    const s=this.job?.library,all=Object.values(s?.entries || {}),counts={saved:0,pending:0,parked:0,manual:0};for(const f of all){if(f.parked)counts.parked++;else if(['pending','deferred'].includes(f.status))counts.pending++;else if(f.status in counts)counts[f.status]++;}
+    const s=this.job?.library,all=this.job?retainedFileRows(this.job):[],counts={saved:0,pending:0,parked:0,manual:0};for(const f of all){if(f.parked)counts.parked++;else if(['pending','deferred'].includes(f.status))counts.pending++;else if(f.status in counts)counts[f.status]++;}
     for(const [key,n] of Object.entries(counts))this.$('library-count-'+key).textContent=n.toLocaleString();
     const index=this.job?libraryIndex(this.job):null,sources=s?.sources || [],done=sources.filter(x=>x.done&&!x.error).length,unsupported=sources.reduce((n,x)=>n+(x.unsupported || 0),0),external=Object.values(s?.directories || {}).filter(x=>x.external).length;
     this.$('library-total').textContent=all.length.toLocaleString()+' files';
@@ -38,17 +39,21 @@ export class LibraryPanel {
     for(const id of ['first','prev','next','last'])this.$('library-'+id).disabled=['first','prev'].includes(id)?this.page===0:this.page===result.pages-1;
     for(const v of ['list','grid'])this.$('library-'+v).setAttribute('aria-pressed',String(v===this.view));
     const enabled=!this.controls.running&&this.controls.canEdit!==false&&!this.controls.initializing;
-    const key=JSON.stringify([result.files.map(f=>[f.id,f.name,f.size,f.status,f.parked,f.attempts,f.error,f.path,f.updated,f.routesTried,f.imageExcluded,f.duplicate,analysis.get(f.id)]),this.view,this.page,enabled]);if(key===this.key)return;this.key=key;
+    const key=JSON.stringify([result.files.map(f=>[f.id,f.name,f.size,f.status,f.parked,f.attempts,f.error,f.path,f.updated,f.sourceRefs,f.routesTried,f.imageExcluded,f.duplicate,analysis.get(f.id)]),this.view,this.page,enabled]);if(key===this.key)return;this.key=key;
     const container=this.$('library-files');container.className='library-files '+this.view;const fragment=this.doc.createDocumentFragment();
     for(const f of result.files){
       const row=this.node('article','library-row'),icon=this.node('span','file-icon',(f.name.split('.').at(-1) || 'FILE').slice(0,5).toUpperCase());icon.setAttribute('aria-hidden','true');
       const intel=analysis.get(f.id) || {},info=this.node('div','file-info'),name=this.node('strong','file-name',f.name),date=f.updated || f.uploaded || f.created,meta=this.node('span','file-meta',fileSize(f.size)+(epoch(date)?' · '+sourceDate(date).toLocaleDateString():''));info.append(name,meta);
       if(intel.version){const v=intel.version,badge=this.node('span','file-version',({preferred:'Preferred version',earlier:'Earlier version',identical:'Same content','larger-candidate':'Larger · review',review:'Version · review'}[v.role]));badge.dataset.role=v.role;info.append(badge);}
       const status=this.node('span','file-badge',label(f));status.dataset.status=f.parked?'parked':f.status;
-      const actions=this.node('div','file-actions'),link=this.node('a','file-open','Open in ChatGPT ↗');link.href=f.parent?'https://chatgpt.com/library/d/'+encodeURIComponent(f.parent):'https://chatgpt.com/library';link.target='_blank';link.rel='noopener';actions.append(link);
-      if(!['saved','manual','pending'].includes(f.status)||f.parked){const retry=this.node('button','file-retry','Retry this file');retry.dataset.retry=f.id;retry.disabled=!enabled;actions.append(retry);}
+      const actions=this.node('div','file-actions'),link=this.node('a','file-open','Open in ChatGPT ↗');link.href=f.retainedSource&&f.sourceKind==='chat'?'https://chatgpt.com/c/'+encodeURIComponent(f.sourceConversationId || f.conversationIds?.[0] || ''):f.parent?'https://chatgpt.com/library/d/'+encodeURIComponent(f.parent):'https://chatgpt.com/library';link.target='_blank';link.rel='noopener';actions.append(link);
+      if(!['saved','manual','pending'].includes(f.status)||f.parked){const retry=this.node('button','file-retry','Retry this file');retry.dataset.retry=f.sourceKey || f.id;retry.disabled=!enabled;actions.append(retry);}
       const details=this.node('details','file-details'),summary=this.node('summary',null,'Details');details.append(summary);
       const reason=f.parked?`Skipped after ${f.attempts || LIBRARY_FAILURE_LIMIT} failed attempts. Scans and restarts keep it parked until you retry this file.`:f.imageExcluded?'Image downloads are switched off. Enable Download images to resume eligible images.':f.status==='manual'?(f.external?'Connected file · open its provider through ChatGPT.':'10 MB or larger · download it manually in ChatGPT, then import the copy in Viewer.'):f.status==='saved'?'Verified local copy · available in Viewer Files & Library.':f.attempts?`Attempt ${f.attempts}/${LIBRARY_FAILURE_LIMIT} failed; one more failure parks this file.`:'Waiting in the download queue.';
+      const refs=f.sourceRefs || [],kinds=new Set(refs.map(r=>r.kind));
+      info.append(this.node('span','file-meta',kinds.size===2?'Chat + Library · linked file':kinds.has('chat')?'Chat attachment · retained record':'Library file'));
+      for(const ref of refs)if(ref.name&&ref.name!==f.name)details.append(this.node('small',null,(ref.kind==='chat'?'Chat attachment name: ':'Library name: ')+ref.name));
+      for(const ref of refs)if(ref.presence!=='observed')details.append(this.node('p','file-reason',ref.presence==='previous-version'?'Previous verified version retained.':ref.presence==='chat-unavailable'?'Source chat is currently unavailable. Saved files remain available; Library routes can still be used.':ref.kind==='library'?'Not seen in the last complete Library scan. Saved copies remain available; a chat route may still work.':'Not seen in the latest saved chat body. The file and its Library references remain in the backup.'));
       details.append(this.node('p','file-reason',reason));if(f.error)details.append(this.node('p','file-error',f.error));if(f.path)details.append(this.node('small',null,f.path));
       if(intel.duplicate || f.duplicate)details.append(this.node('p','file-hash','SHA-256 verified · identical content shares a saved copy'+(intel.duplicate?' with '+intel.duplicate.canonicalName:'.')));
       if(f.sha256)details.append(this.node('small','file-hash',f.sha256));

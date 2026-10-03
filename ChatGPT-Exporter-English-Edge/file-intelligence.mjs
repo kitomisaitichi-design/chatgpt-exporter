@@ -1,16 +1,18 @@
+import {fileReferences,relatedFiles,compatibleFile,rememberFileResult} from './file-links.mjs';
+export {fileReferences} from './file-links.mjs';
 import {epoch,safeName,attachmentError,ATTACHMENT_MAX_BYTES} from './core.mjs';
 
 export const validHash=value=>typeof value==='string' && /^[a-f0-9]{64}$/i.test(value)?value.toLowerCase():null;
 export const isImage=file=>/^image\//i.test(file?.mime || file?.mime_type || '') || /\.(?:png|jpe?g|gif|webp|avif|bmp|svg|ico|tiff?|heic|heif|jxl)$/i.test(file?.name || '');
 export function applyImagePreference(job){
-  for(const f of Object.values(job?.library?.entries || {})){
+  for(const f of fileReferences(job)){
     if(job.options?.downloadImages===false && isImage(f) && f.status!=='saved' && !f.parked){f.imageExcluded=true;f.status='manual';}
     else if(job.options?.downloadImages!==false && f.imageExcluded){f.imageExcluded=false;f.status=f.parked?'unavailable':f.external || f.size!==null&&f.size>=10_000_000?'manual':'pending';}
   }
 }
 export const safeContentPath=value=>typeof value==='string' && value.startsWith('attachments/') && !value.includes('\\') && !/[\x00-\x1f]/.test(value) && value.split('/').every(p=>p && p!=='.' && p!=='..');
 export async function contentHash(blob){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');}
-export function fileReferences(job){return [...Object.values(job?.library?.entries || {}),...Object.values(job?.entries || {}).flatMap(e=>e.attachments || [])];}
+
 
 // A browser's numbered-copy suffix is evidence of a family, not a revision date.
 export function fileFamily(file){
@@ -56,13 +58,23 @@ export class ContentStore {
     }
     return null;
   }
+  async findFor(file,{maxBytes=ATTACHMENT_MAX_BYTES}={}){
+    const expected=validHash(file.remoteSha256 || (!file.refresh?file.sha256:null));
+    const known=await this.find(expected,{size:file.size??null,maxBytes,exclude:file});if(known)return known;
+    if(file.refresh&&!expected)return null;const visited=new Set();
+    for(const f of relatedFiles(this.getJob(),file)){
+      if(f===file || f.status!=='saved' || f.refresh || !validHash(f.sha256) || !safeContentPath(f.path) || visited.has(f.path) || !compatibleFile(file,f))continue;visited.add(f.path);
+      try{await this.checkpoint();const checked=await this.inspect(f.path,maxBytes);if(checked.hash!==validHash(f.sha256) || expected&&checked.hash!==expected || file.size!=null&&checked.blob.size!==Number(file.size))continue;return {status:'saved',source:'identity-reuse',refresh:false,path:f.path,sha256:checked.hash,size:checked.blob.size,mime:f.mime || null,duplicate:true,duplicateOf:f.id};}catch(e){if(e.name==='Paused')throw e;}
+    }
+    return null;
+  }
   async save(blob,file,{source='network',maxBytes=ATTACHMENT_MAX_BYTES}={}){
     if(blob.size===0 || blob.size>maxBytes)throw Error('File is outside its byte limit.');
     const hash=await contentHash(blob),expected=validHash(file.remoteSha256);if(expected&&expected!==hash)throw Error('File bytes do not match the reported SHA-256.');
-    const reused=await this.find(hash,{size:blob.size,maxBytes,exclude:file});if(reused)return reused;
+    const reused=await this.find(hash,{size:blob.size,maxBytes,exclude:file});if(reused)return rememberFileResult(this.getJob(),file,reused);
     const path=`attachments/content/${hash}/${safeName(file.name || file.id || 'file',160)}`;
     await this.checkpoint();await this.write(path,blob);
-    return {status:'saved',source,refresh:false,size:blob.size,path,sha256:hash,duplicateOf:null,duplicate:false,mime:blob.type || file.mime || null};
+    return rememberFileResult(this.getJob(),file,{status:'saved',source,refresh:false,size:blob.size,path,sha256:hash,duplicateOf:null,duplicate:false,mime:blob.type || file.mime || null});
   }
   async deduplicate(){
     const job=this.getJob(),state=job.library ||= {entries:{},directories:{},sources:[]},groups=new Map(),errors=[],checked=new Map();

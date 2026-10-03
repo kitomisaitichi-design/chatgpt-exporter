@@ -1,3 +1,4 @@
+import {seedFileSources,observeChatFiles,sharedFileCandidates,sharedFileBudget,rememberFileResult,retryLinkedFile,fileReferences} from './file-links.mjs';
 import {ContentStore,validHash,isImage,applyImagePreference} from './file-intelligence.mjs';
 import {LibraryPanel} from './library-ui.mjs';
 import {LIBRARY_LIMIT,libraryState,queueLibraryScan,libraryIndex,libraryPath,libraryCandidates,manualFiles,retryLibraryFile,LIBRARY_FAILURE_LIMIT} from './library.mjs';
@@ -44,7 +45,7 @@ function update() {
 async function bridge(args,targetId=tabId) {
   if (!targetId) throw new Paused('Connect to ChatGPT first.');
   let timer;let results;
-  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV243) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV243.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
+  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV244) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV244.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
   return results[0]?.result || {ok:false,status:0,kind:'bridge'};
 }
 async function sense(expected) {
@@ -81,7 +82,7 @@ async function readyBridge() {
 async function ensureTab() {if (tabId) {try {const tab=await chrome.tabs.get(tabId);if (tab.url?.startsWith('https://chatgpt.com/')) return;} catch {}}const tab=await chrome.tabs.create({url:'https://chatgpt.com/',active:false});tabId=tab.id;await chrome.storage.session.set({exporterTabId:tabId});}
 function applyJobOptionsToUI(){if(!job)return;for (const id of ['archived','projects','assist','verify','attachments','passive','yield-user']) $(id).checked=job.options[id]!==false;$('library-enabled').checked=job.options.library!==false;$('download-images').checked=job.options.downloadImages!==false;$('smart-watch').checked=job.options.smartWatch!==false;$('work-mode').value=job.options.mode || 'index-first';$('passive-hours').value=String(job.options.passiveHours || Math.round((job.schedule?.intervalMs || 10800000)/3600000) || 3);$('recent-check-minutes').value=String(Math.round((job.schedule?.recentIntervalMs || 300000)/60000));}
 function migrateLoadedJob(j){
-  if(!j)return false;let changed=false;const now=Date.now();if(j.options.library==null){j.options.library=true;changed=true;}if(j.options.smartWatch==null){j.options.smartWatch=true;changed=true;}libraryState(j,now);
+  if(!j)return false;const linksNew=!j.fileLinks;seedFileSources(j);let changed=linksNew;const now=Date.now();if(j.options.library==null){j.options.library=true;changed=true;}if(j.options.smartWatch==null){j.options.smartWatch=true;changed=true;}libraryState(j,now);
   if(j.version==='2.3.0'){
     const regimes=j.pace?.regimes || [],last=[...regimes].reverse().find(r=>['step-up','limit-same-episode'].includes(r.event));
     const explicit=last?.retryAfter>0 ? last.at+last.retryAfter : 0;
@@ -209,12 +210,12 @@ async function buildLocalAttachmentIndex(){
   localAttachmentIndex={index,scanned,truncated,at:Date.now()};return localAttachmentIndex;
 }
 async function reuseLocalAttachment(asset,basename){
-  if(!asset?.name || job.options.downloadImages===false && isImage(asset))return null;const inventory=await buildLocalAttachmentIndex(),all=inventory.index.get(localKey(asset.name)) || [];if(!all.length)return null;
-  const sized=asset.size ? all.filter(x=>x.size===Number(asset.size)) : all;const candidate=(sized.length?sized:[])[0];if(!candidate)return null;
-  const file=await candidate.handle.getFile(),hash=await byteHash(file),reused=await contentStore.find(hash,{size:file.size});
-  const saved=reused || (candidate.source==='backup'?{status:'saved',source:'existing-local',size:file.size,path:candidate.path,sha256:hash}:await contentStore.save(file,asset,{source:'local-copy'}));
-  return {name:asset.name,id:asset.id,...saved,sourcePath:candidate.path,mime:file.type || asset.mime || null};
+  const expected=validHash(asset.remoteSha256);if(!expected || !asset?.name || job.options.downloadImages===false && isImage(asset))return null;
+  const inventory=await buildLocalAttachmentIndex(),candidates=(inventory.index.get(localKey(asset.name)) || []).filter(x=>asset.size!=null&&x.size===Number(asset.size));
+  for(const candidate of candidates){const file=await candidate.handle.getFile();if(await byteHash(file)!==expected)continue;const saved=await contentStore.find(expected,{size:file.size}) || await contentStore.save(file,asset,{source:'local-copy'});return {name:asset.name,id:asset.id,...saved,mime:file.type || asset.mime || null};}
+  return null;
 }
+
 async function validateSavedAttachment(asset,prior){
   if(!prior?.path || !prior.path.startsWith('attachments/') || prior.path.split('/').some(p=>!p || p==='..'))return null;
   try{
@@ -226,30 +227,34 @@ async function validateSavedAttachment(asset,prior){
       await directory.removeEntry(parts.at(-1));localAttachmentIndex=null;return null;
     }
     if(file.size===0 || file.size>ATTACHMENT_MAX_BYTES || asset.size && file.size!==Number(asset.size))return null;
-    const hash=await byteHash(file);if(validHash(prior.sha256)&&hash!==prior.sha256)return null;const reused=await contentStore.find(hash,{size:file.size,exclude:prior});return {...prior,...reused,status:'saved',imageExcluded:false,error:undefined,autoRetry:false,size:file.size,sha256:hash,validatedAt:Date.now()};
+    const hash=await byteHash(file);if(validHash(prior.sha256)&&hash!==prior.sha256 || validHash(asset.remoteSha256)&&hash!==asset.remoteSha256)return null;const reused=await contentStore.find(hash,{size:file.size,exclude:prior});return {...prior,...reused,name:asset.name,id:asset.id,status:'saved',imageExcluded:false,error:undefined,autoRetry:false,size:file.size,sha256:hash,validatedAt:Date.now()};
   }catch(e){if(e.name==='NotFoundError')return null;throw e;}
 }
 async function backupAttachments(entry,data,basename,beforeRequest){
-  const assets=extractAttachments(data),results=[],already=new Map((entry.attachments || []).map(a=>[String(a.id || a.name),a]));if(!assets.length)return results;
+  const assets=extractAttachments(data),results=[],already=new Map((entry.attachments || []).map(a=>[String(a.id || a.name),a]));observeChatFiles(job,entry.id,assets);if(!assets.length)return results;
   for(const [assetIndex,asset] of assets.entries()){
     const prior=already.get(String(asset.id || asset.name)),dest=`attachments/${basename}/${safeName(asset.name || asset.id || 'attachment',120)}`;
-    const verified=await validateSavedAttachment(asset,prior?.path?prior:{...prior,name:asset.name,id:asset.id,path:dest,source:'existing-local'});if(verified){results.push(verified);continue;}
-    if(job.options.downloadImages===false && isImage(asset)){results.push({name:asset.name,id:asset.id,mime:asset.mime,status:'manual',imageExcluded:true,size:asset.size || null,autoRetry:false});continue;}
-    if(prior?.autoRetry===false && ['unavailable','permission-unavailable'].includes(prior.status)){results.push(prior);continue;}
-    if(asset.size && asset.size>ATTACHMENT_MAX_BYTES){results.push({name:asset.name,id:asset.id,status:'skipped-too-large',size:asset.size,autoRetry:false});continue;}
-    const local=await reuseLocalAttachment(asset,basename);if(local){results.push(local);continue;}
+    const push=(result,failure=false)=>{const {urls,asset_pointer,...metadata}=asset;results.push(rememberFileResult(job,asset,{...metadata,...result},{failure}));};
+    const verified=prior?.path || validHash(asset.remoteSha256)?await validateSavedAttachment(asset,prior?.path?prior:{...prior,name:asset.name,id:asset.id,path:dest,source:'existing-local'}):null;if(verified){push(verified);continue;}
+    if(job.options.downloadImages===false && isImage(asset)){push({name:asset.name,id:asset.id,mime:asset.mime,status:'manual',imageExcluded:true,size:asset.size || null,autoRetry:false});continue;}
+    const linked=await contentStore.findFor(asset);if(linked){push(linked);continue;}
+    const budget=sharedFileBudget(job,asset);if(budget.parked){push({name:asset.name,id:asset.id,status:'unavailable',...budget,autoRetry:false,error:'Parked after two shared file attempts. Retry this file to resume.'});continue;}
+    if(prior?.autoRetry===false && ['unavailable','permission-unavailable'].includes(prior.status)){push(prior);continue;}
+    if(asset.size && asset.size>=LIBRARY_LIMIT){push({name:asset.name,id:asset.id,status:'skipped-too-large',size:asset.size,autoRetry:false});continue;}
+    const local=await reuseLocalAttachment(asset,basename);if(local){push(local);continue;}
     try {
-      await beforeRequest();const prep=await bridge({op:'assetPrepare',scope,excludeImages:job.options.downloadImages===false,fileId:asset.id,candidates:attachmentCandidates(asset,entry.id),maxBytes:ATTACHMENT_MAX_BYTES});
+      await beforeRequest();const prep=await bridge({op:'assetPrepare',scope,excludeImages:job.options.downloadImages===false,fileId:asset.id,candidates:[...(asset.urls || []),...sharedFileCandidates(job,asset,entry.id),...attachmentCandidates(asset,entry.id)],maxBytes:LIBRARY_LIMIT-1});
       if(!prep.ok){
-        if(prep.imageExcluded){results.push({name:asset.name,id:asset.id,mime:prep.type,status:'manual',imageExcluded:true,size:asset.size || null,autoRetry:false});continue;}
-        if(prep.status===429){job.lastLimitSeen=Date.now();limited(job.pace,prep.retryAfter,Date.now(),Math.random(),'exporter');recordLimit(job);await db.put('jobs',scope.key,job);results.push({name:asset.name,id:asset.id,status:'rate-limited',size:prep.size || asset.size || null,error:prep.error || 'HTTP 429',retryAfter:prep.retryAfter || null,autoRetry:true});continue;}
+        if([401,409].includes(prep.status))throw new Paused(prep.error || 'Reconnect to ChatGPT before downloading files.');
+        if(prep.imageExcluded){push({name:asset.name,id:asset.id,mime:prep.type,status:'manual',imageExcluded:true,size:asset.size || null,autoRetry:false});continue;}
+        if(prep.status===429){job.lastLimitSeen=Date.now();limited(job.pace,prep.retryAfter,Date.now(),Math.random(),'exporter');recordLimit(job);await db.put('jobs',scope.key,job);push({name:asset.name,id:asset.id,status:'rate-limited',size:prep.size || asset.size || null,error:prep.error || 'HTTP 429',retryAfter:prep.retryAfter || null,autoRetry:true});continue;}
         const status=prep.status===413?'skipped-too-large':[401,403,409].includes(prep.status)?'permission-unavailable':!prep.status || prep.status>=500?'deferred':'unavailable';
-        results.push({name:asset.name,id:asset.id,status,size:prep.size || asset.size || null,error:prep.error || `HTTP ${prep.status}`,routesTried:prep.attempts || [],autoRetry:status==='deferred'});continue;
+        push({name:asset.name,id:asset.id,status,size:prep.size || asset.size || null,error:prep.error || `HTTP ${prep.status}`,routesTried:prep.attempts || [],autoRetry:status==='deferred' || status==='unavailable'},status!=='skipped-too-large');continue;
       }
       const chunks=[];let offset=0;try{for(;;){await engine?.holdPoint();const part=await bridge({op:'assetChunk',key:prep.key,offset,length:384*1024});if(!part.ok){const err=new Error(part.error || 'Attachment chunk failed.');err.status=part.status || 0;throw err;}const bytes=decode64(part.base64);if(part.next!==offset+bytes.length || part.next<=offset && !part.done || part.next>prep.size)throw new Error('Attachment chunk made no valid progress.');chunks.push(bytes);offset=part.next;if(part.done){if(offset!==prep.size)throw new Error('Attachment bytes were incomplete.');break;}}}finally{await bridge({op:'assetRelease',key:prep.key}).catch(()=>{});}
       const preview=new Blob(chunks);const envelope=attachmentError(await preview.slice(0,8192).text());if(envelope){const err=new Error(`Attachment service returned ${envelope}, not document bytes.`);err.status=404;throw err;}if(asset.size && offset!==Number(asset.size))throw new Error(`Attachment size mismatch: expected ${asset.size}, received ${offset}.`);
-      await bridge({op:'assetRelease',key:prep.key}).catch(()=>{});const blob=new Blob(chunks,{type:prep.type || asset.mime || 'application/octet-stream'}),filename=safeName(asset.name || asset.id || 'attachment',120);const saved=await contentStore.save(blob,asset);results.push({name:asset.name,id:asset.id,...saved,validatedAt:Date.now(),routesTried:prep.attempts || [],mime:prep.type || asset.mime || null});
-    } catch(e){if(e instanceof Paused)throw e;if(e instanceof YieldAttachments){for(const remaining of assets.slice(assetIndex)){const old=already.get(String(remaining.id || remaining.name));results.push(old?.status==='saved'?old:{name:remaining.name,id:remaining.id,status:'deferred',size:remaining.size || null,error:e.message,autoRetry:true,yielded:true});}break;}const status=e.status===429?'rate-limited':[401,403,409].includes(e.status)?'permission-unavailable':e.status===404?'unavailable':'deferred';results.push({name:asset.name,id:asset.id,status,size:asset.size || null,error:e.message || String(e),autoRetry:status==='rate-limited' || status==='deferred'});}
+      await bridge({op:'assetRelease',key:prep.key}).catch(()=>{});const blob=new Blob(chunks,{type:prep.type || asset.mime || 'application/octet-stream'}),filename=safeName(asset.name || asset.id || 'attachment',120);const saved=await contentStore.save(blob,asset,{maxBytes:LIBRARY_LIMIT-1});push({name:asset.name,id:asset.id,...saved,validatedAt:Date.now(),routesTried:prep.attempts || [],mime:prep.type || asset.mime || null});
+    } catch(e){if(e instanceof Paused)throw e;if(e instanceof YieldAttachments){for(const remaining of assets.slice(assetIndex)){const old=already.get(String(remaining.id || remaining.name));results.push(old?.status==='saved'?old:{name:remaining.name,id:remaining.id,status:'deferred',size:remaining.size || null,error:e.message,autoRetry:true,yielded:true});}break;}const status=e.status===429?'rate-limited':[401,403,409].includes(e.status)?'permission-unavailable':e.status===404?'unavailable':'deferred';push({name:asset.name,id:asset.id,status,size:asset.size || null,error:e.message || String(e),autoRetry:status==='rate-limited' || status==='deferred'},status!=='rate-limited');}
   }
   return results;
 }
@@ -258,7 +263,7 @@ async function ensureLibraryJob(){if(!connected || !scope)throw new Paused('Conn
 async function fileAt(path){let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);return (await d.getFileHandle(parts.at(-1))).getFile();}
 async function byteHash(blob){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');}
 async function verifyLibraryFile(f){
-  try{const disk=await fileAt(f.path || libraryPath(f));if(disk.size>=LIBRARY_LIMIT || f.size!==null&&disk.size!==f.size || attachmentError(await disk.slice(0,8192).text()))return false;const hash=await byteHash(disk);if(f.sha256 && hash!==f.sha256)return false;f.sha256=hash;f.size=disk.size;return true;}
+  try{const disk=await fileAt(f.path || libraryPath(f));if(disk.size===0 || disk.size>ATTACHMENT_MAX_BYTES || f.size!=null&&disk.size!==f.size || attachmentError(await disk.slice(0,8192).text()))return false;const hash=await byteHash(disk);if(f.sha256 && hash!==f.sha256)return false;f.sha256=hash;f.size=disk.size;return true;}
   catch(e){if(['NotFoundError','TypeMismatchError'].includes(e.name))return false;throw e;}
 }
 async function downloadLibraryFile(f,beforeRequest){
@@ -270,8 +275,8 @@ async function downloadLibraryFile(f,beforeRequest){
     if(f.size!==null && validHash(f.remoteSha256)){const inventory=await buildLocalAttachmentIndex(),candidates=(inventory.index.get(localKey(f.name)) || []).filter(x=>x.size===f.size && x.size<LIBRARY_LIMIT);if(candidates.length===1){const file=await candidates[0].handle.getFile(),hash=await byteHash(file);if(f.remoteSha256===hash)return await contentStore.save(file,f,{source:'local-copy',maxBytes:LIBRARY_LIMIT-1});}}
   }
   if(job.options.downloadImages===false && isImage(f))return {status:'manual',imageExcluded:true,error:null};
-  const reused=await contentStore.find(f.remoteSha256 || (!f.refresh?f.sha256:null),{size:f.size,maxBytes:LIBRARY_LIMIT-1,exclude:f});if(reused)return reused;
-  await beforeRequest();const prep=await bridge({op:'assetPrepare',scope,excludeImages:job.options.downloadImages===false,fileId:f.fileId || f.id,library:true,candidates:libraryCandidates(f),maxBytes:LIBRARY_LIMIT-1});
+  const reused=await contentStore.findFor(f,{maxBytes:LIBRARY_LIMIT-1});if(reused)return reused;
+  await beforeRequest();const prep=await bridge({op:'assetPrepare',scope,excludeImages:job.options.downloadImages===false,fileId:f.fileId || f.id,library:true,candidates:sharedFileCandidates(job,f),maxBytes:LIBRARY_LIMIT-1});
   if(!prep.ok){if(prep.imageExcluded)return {status:'manual',imageExcluded:true,mime:prep.type,error:null};if([401,409].includes(prep.status))throw new Paused(prep.error || 'Reconnect to ChatGPT before downloading Library files.');return {status:prep.status===413?'manual':'deferred',httpStatus:prep.status,retryAfter:prep.retryAfter,routesTried:prep.attempts || [],size:prep.size ?? f.size,error:prep.error || 'HTTP '+prep.status};}
   const chunks=[];let offset=0;
   try{for(;;){await engine?.holdPoint();const part=await bridge({op:'assetChunk',key:prep.key,offset,length:384*1024});if(!part.ok)throw Error(part.error || 'Library file chunk failed.');const bytes=decode64(part.base64);if(part.next!==offset+bytes.length || !part.done&&part.next<=offset || part.next>=LIBRARY_LIMIT)throw Error('Library chunk exceeded its boundary or made no progress.');chunks.push(bytes);offset=part.next;if(part.done){if(offset!==prep.size)throw Error('Library file bytes were incomplete.');break;}}}finally{await bridge({op:'assetRelease',key:prep.key}).catch(()=>{});}
@@ -338,10 +343,10 @@ async function passiveTick(){
 }
 async function init() {
   logPanel=new LogPanel(document,{download,onError:error});
-  libraryPanel=new LibraryPanel(document,{onError:error,retry:async id=>{if(running || !canEdit || initializing)return;await ensureLibraryJob();if(!retryLibraryFile(job.library.entries[id]))return;await db.put('jobs',scope.key,job);await report(job);update();await start(false,true);}});
+  libraryPanel=new LibraryPanel(document,{onError:error,retry:async id=>{if(running || !canEdit || initializing)return;await ensureLibraryJob();if(!retryLinkedFile(job,job.library.entries[id] || Object.values(job.fileLinks?.sources || {}).find(f=>f.sourceKey===id || f.id===id)))return;await db.put('jobs',scope.key,job);await report(job);update();await start(false,true);}});
   bind('library-deduplicate',deduplicateFiles);
   bind('library-scan',async()=>{await ensureLibraryJob();queueLibraryScan(job,Date.now(),true);await db.put('jobs',scope.key,job);await start(false,true);});
-  bind('library-retry',async()=>{await ensureLibraryJob();for(const f of Object.values(libraryState(job).entries))if(f.parked || ['unavailable','permission-unavailable'].includes(f.status))retryLibraryFile(f);await db.put('jobs',scope.key,job);await report(job);await start(false,true);});
+  bind('library-retry',async()=>{await ensureLibraryJob();for(const f of fileReferences(job))if(f.parked || ['unavailable','permission-unavailable'].includes(f.status))retryLinkedFile(job,f);await db.put('jobs',scope.key,job);await report(job);await start(false,true);});
   bind('library-index',()=>{if(job)download(new Blob([JSON.stringify(libraryIndex(job),null,2)],{type:'application/json'}),'chatgpt-library-index.json');});
   bind('library-manual',()=>{if(job)download(new Blob([catalogHTML(job,true)],{type:'text/html'}),'chatgpt-library-manual-downloads.html');});
 
@@ -371,6 +376,3 @@ async function init() {
   else if (job?.status==='pausing' || job?.status==='held') {job.status='paused';job.message='The previous live hold/run is no longer in memory, but its exact queue/cursors are preserved. Click Connect, then resume; no scan reset is performed.';await db.put('jobs',scope.key,job);update();}
 }
 navigator.locks.request('english-exporter-dashboard',{ifAvailable:true},async lock=>{if(!lock){canEdit=false;update();$('message').textContent='Another exporter tab is already open. Continue there, or close it and reload this tab.';return;}await init();await new Promise(()=>{});}).catch(error);
-
-
-

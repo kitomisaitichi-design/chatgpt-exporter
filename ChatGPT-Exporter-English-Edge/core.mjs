@@ -1,4 +1,4 @@
-export const VERSION = '2.4.3';
+export const VERSION = '2.4.4';
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const freshPace = () => ({delay:5000, floor:5000, next:0, until:0, strikes:0, ok:0, recent:[], lastLimit:0, tier:0, tierChangedAt:0, idleRelaxAt:0, stableSince:0, regimes:[]});
 // Tiers are the network cadence. Local disk/cache work never consumes these delays.
@@ -197,11 +197,11 @@ function attachmentFrom(a,nodeId,partIndex){
   const ext=String(name).split('.').pop()?.toLowerCase();
   const mime=a.mime_type || a.mime || (a.content_type==='image_asset_pointer'?'image/unknown':a.content_type) || '';
   if(!(DOC_EXT.has(ext) || IMAGE_EXT.has(ext) || /^(?:image\/|text\/|application\/(?:json|xml|rtf|pdf|msword|vnd\.|octet-stream))/.test(mime)))return null;
-  const size=Number(a.size || a.file_size || a.bytes || 0) || null;
+  const size=Number(a.file_size_bytes ?? a.size_bytes ?? a.size ?? a.file_size ?? a.bytes ?? 0) || null;
   const rawId=a.file_id || a.id || a.asset_pointer || a.asset_id || null;
   const id=pointerId(rawId) || pointerId(a.asset_pointer);
   const urls=[a.download_url,a.download_link,a.url,a.href].filter(v=>typeof v==='string');
-  return {key:String(id || a.asset_pointer || urls[0] || `${nodeId}:${name}`),id,library_file_id:a.library_file_id || null,name,mime,size,asset_pointer:a.asset_pointer || null,urls,nodeId};
+  return {key:String(id || a.asset_pointer || urls[0] || `${nodeId}:${name}`),id,library_file_id:a.library_file_id || null,name,mime,size,remoteSha256:/^[a-f0-9]{64}$/i.test(a.sha256 || a.content_sha256 || '')?String(a.sha256 || a.content_sha256).toLowerCase():null,asset_pointer:a.asset_pointer || null,urls,nodeId};
 }
 export function attachmentCandidates(a,conversationId){
   const out=[...(a.urls || [])];
