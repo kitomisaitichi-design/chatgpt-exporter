@@ -1,13 +1,16 @@
 import {libraryIndex,LIBRARY_FAILURE_LIMIT} from './library.mjs';
+import {analyzeFiles} from './file-intelligence.mjs';
+import {epoch} from './core.mjs';
 
 export const fileSize=n=>n==null?'Unknown size':n<1000?n+' B':n<1_000_000?(n/1000).toFixed(1)+' KB':(n/1_000_000).toFixed(2)+' MB';
+const sourceDate=value=>new Date(typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)?value+'T12:00:00':epoch(value));
 export function selectLibraryFiles(files,{search='',filter='all',sort='recent',page=0,pageSize=50}={}) {
-  const q=search.trim().toLocaleLowerCase(),selected=files.filter(f=>(!q||(f.name+' '+f.id).toLocaleLowerCase().includes(q)) && (filter==='all' || filter==='manual'&&f.status==='manual' || filter==='saved'&&f.status==='saved' || filter==='parked'&&f.parked || filter==='pending'&&['pending','deferred'].includes(f.status)&&!f.parked || filter==='attention'&&!['saved','manual'].includes(f.status)));
-  selected.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='size'?(b.size??-1)-(a.size??-1):sort==='status'?a.status.localeCompare(b.status)||a.name.localeCompare(b.name):(Date.parse(b.updated)||0)-(Date.parse(a.updated)||0)||a.name.localeCompare(b.name));
+  const analysis=analyzeFiles(files),q=search.trim().toLocaleLowerCase(),selected=files.filter(f=>(!q||(f.name+' '+f.id).toLocaleLowerCase().includes(q)) && (filter==='all' || filter==='duplicates'&&(analysis.get(f.id)?.duplicate || f.duplicate) || filter==='versions'&&analysis.get(f.id)?.version || filter==='preferred'&&analysis.get(f.id)?.version?.role==='preferred' || filter==='images-off'&&f.imageExcluded || filter==='manual'&&f.status==='manual' || filter==='saved'&&f.status==='saved' || filter==='parked'&&f.parked || filter==='pending'&&['pending','deferred'].includes(f.status)&&!f.parked || filter==='attention'&&!['saved','manual'].includes(f.status)));
+  selected.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='size'?(b.size??-1)-(a.size??-1):sort==='status'?a.status.localeCompare(b.status)||a.name.localeCompare(b.name):(epoch(b.updated)||epoch(b.uploaded)||epoch(b.created))-(epoch(a.updated)||epoch(a.uploaded)||epoch(a.created))||a.name.localeCompare(b.name));
   const size=pageSize==='all'?Math.max(1,selected.length):Math.max(1,Number(pageSize)||50),pages=Math.max(1,Math.ceil(selected.length/size)),current=Math.max(0,Math.min(pages-1,page));
   return {files:selected.slice(current*size,(current+1)*size),total:selected.length,page:current,pages,start:selected.length?current*size+1:0,end:Math.min(selected.length,(current+1)*size)};
 }
-const label=f=>f.parked?'Parked':({saved:'Saved',manual:'Manual',pending:'Queued',deferred:'Waiting',unavailable:'Unavailable','permission-unavailable':'Access denied'}[f.status] || f.status);
+const label=f=>f.parked?'Parked':f.imageExcluded?'Images off':f.duplicate&&f.status==='saved'?'Shared copy':({saved:'Saved',manual:'Manual',pending:'Queued',deferred:'Waiting',unavailable:'Unavailable','permission-unavailable':'Access denied'}[f.status] || f.status);
 export class LibraryPanel {
   constructor(document,{retry,onError}) {
     this.doc=document;this.$=id=>document.getElementById(id);this.page=0;this.key='';this.view='list';this.retry=retry;this.onError=onError;
@@ -24,7 +27,10 @@ export class LibraryPanel {
     for(const [key,n] of Object.entries(counts))this.$('library-count-'+key).textContent=n.toLocaleString();
     const index=this.job?libraryIndex(this.job):null,sources=s?.sources || [],done=sources.filter(x=>x.done&&!x.error).length,unsupported=sources.reduce((n,x)=>n+(x.unsupported || 0),0),external=Object.values(s?.directories || {}).filter(x=>x.external).length;
     this.$('library-total').textContent=all.length.toLocaleString()+' files';
-    this.$('library-summary').textContent=all.length?fileSize(all.filter(f=>f.status==='saved').reduce((n,f)=>n+(f.size || 0),0))+' kept locally · automatic downloads under 10 MB':'Discover your files, save small downloads, and keep larger items within reach.';
+    const analysis=analyzeFiles(all),unique=new Map(all.filter(f=>f.status==='saved').map(f=>[f.path || f.id,f.size || 0]));
+    this.$('library-summary').textContent=all.length?fileSize([...unique.values()].reduce((n,size)=>n+size,0))+' in unique local copies · automatic downloads under 10 MB':'Discover your files, save small downloads, and keep larger items within reach.';
+    const duplicateCount=all.filter(f=>f.duplicate || analysis.get(f.id)?.duplicate?.isAlias).length,versionCount=new Set([...analysis.values()].filter(x=>x.version).map(x=>x.version.family)).size;
+    this.$('library-intelligence-summary').textContent=duplicateCount+' identical-content aliases · '+versionCount+' version families · '+(this.job?.options?.downloadImages===false?'images excluded from new downloads':'image downloads on')+'.'+(s?.deduplication?' Last smart scan: '+s.deduplication.checked+' local files checked; '+fileSize(s.deduplication.reclaimedBytes || 0)+' reclaimed.':'');
     this.$('library-status').textContent=this.job?.options?.library===false?'Automatic Library backup is off.':sources.some(x=>x.error)?'Scan needs attention · '+sources.filter(x=>x.error).map(x=>x.error).join('; '):index?.coverage_complete?'Inventory complete · '+done+' folders scanned'+(external?' · '+external+' connected folders available in ChatGPT':''):sources.length?'Discovering files · '+done+'/'+sources.length+' folders finished'+(unsupported?' · '+unsupported+' unsupported entries skipped':''):'Ready to discover · scan your Library to begin.';
     this.$('library-discovery').max=Math.max(1,sources.length);this.$('library-discovery').value=done;
     const result=selectLibraryFiles(all,{search:this.$('library-search').value,filter:this.$('library-filter').value,sort:this.$('library-sort').value,page:this.page,pageSize:this.$('library-page-size').value});this.page=result.page;this.pages=result.pages;
@@ -32,17 +38,22 @@ export class LibraryPanel {
     for(const id of ['first','prev','next','last'])this.$('library-'+id).disabled=['first','prev'].includes(id)?this.page===0:this.page===result.pages-1;
     for(const v of ['list','grid'])this.$('library-'+v).setAttribute('aria-pressed',String(v===this.view));
     const enabled=!this.controls.running&&this.controls.canEdit!==false&&!this.controls.initializing;
-    const key=JSON.stringify([result.files.map(f=>[f.id,f.name,f.size,f.status,f.parked,f.attempts,f.error,f.path,f.updated,f.routesTried]),this.view,this.page,enabled]);if(key===this.key)return;this.key=key;
+    const key=JSON.stringify([result.files.map(f=>[f.id,f.name,f.size,f.status,f.parked,f.attempts,f.error,f.path,f.updated,f.routesTried,f.imageExcluded,f.duplicate,analysis.get(f.id)]),this.view,this.page,enabled]);if(key===this.key)return;this.key=key;
     const container=this.$('library-files');container.className='library-files '+this.view;const fragment=this.doc.createDocumentFragment();
     for(const f of result.files){
       const row=this.node('article','library-row'),icon=this.node('span','file-icon',(f.name.split('.').at(-1) || 'FILE').slice(0,5).toUpperCase());icon.setAttribute('aria-hidden','true');
-      const info=this.node('div','file-info'),name=this.node('strong','file-name',f.name),meta=this.node('span','file-meta',fileSize(f.size)+(f.updated&&Number.isFinite(Date.parse(f.updated))?' · '+new Date(f.updated).toLocaleDateString():''));info.append(name,meta);
+      const intel=analysis.get(f.id) || {},info=this.node('div','file-info'),name=this.node('strong','file-name',f.name),date=f.updated || f.uploaded || f.created,meta=this.node('span','file-meta',fileSize(f.size)+(epoch(date)?' · '+sourceDate(date).toLocaleDateString():''));info.append(name,meta);
+      if(intel.version){const v=intel.version,badge=this.node('span','file-version',({preferred:'Preferred version',earlier:'Earlier version',identical:'Same content','larger-candidate':'Larger · review',review:'Version · review'}[v.role]));badge.dataset.role=v.role;info.append(badge);}
       const status=this.node('span','file-badge',label(f));status.dataset.status=f.parked?'parked':f.status;
       const actions=this.node('div','file-actions'),link=this.node('a','file-open','Open in ChatGPT ↗');link.href=f.parent?'https://chatgpt.com/library/d/'+encodeURIComponent(f.parent):'https://chatgpt.com/library';link.target='_blank';link.rel='noopener';actions.append(link);
       if(!['saved','manual','pending'].includes(f.status)||f.parked){const retry=this.node('button','file-retry','Retry this file');retry.dataset.retry=f.id;retry.disabled=!enabled;actions.append(retry);}
       const details=this.node('details','file-details'),summary=this.node('summary',null,'Details');details.append(summary);
-      const reason=f.parked?`Skipped after ${f.attempts || LIBRARY_FAILURE_LIMIT} failed attempts. Scans and restarts keep it parked until you retry this file.`:f.status==='manual'?(f.external?'Connected file · open its provider through ChatGPT.':'10 MB or larger · download it manually in ChatGPT, then import the copy in Viewer.'):f.status==='saved'?'Verified local copy · available in Viewer Files & Library.':f.attempts?`Attempt ${f.attempts}/${LIBRARY_FAILURE_LIMIT} failed; one more failure parks this file.`:'Waiting in the download queue.';
+      const reason=f.parked?`Skipped after ${f.attempts || LIBRARY_FAILURE_LIMIT} failed attempts. Scans and restarts keep it parked until you retry this file.`:f.imageExcluded?'Image downloads are switched off. Enable Download images to resume eligible images.':f.status==='manual'?(f.external?'Connected file · open its provider through ChatGPT.':'10 MB or larger · download it manually in ChatGPT, then import the copy in Viewer.'):f.status==='saved'?'Verified local copy · available in Viewer Files & Library.':f.attempts?`Attempt ${f.attempts}/${LIBRARY_FAILURE_LIMIT} failed; one more failure parks this file.`:'Waiting in the download queue.';
       details.append(this.node('p','file-reason',reason));if(f.error)details.append(this.node('p','file-error',f.error));if(f.path)details.append(this.node('small',null,f.path));
+      if(intel.duplicate || f.duplicate)details.append(this.node('p','file-hash','SHA-256 verified · identical content shares a saved copy'+(intel.duplicate?' with '+intel.duplicate.canonicalName:'.')));
+      if(f.sha256)details.append(this.node('small','file-hash',f.sha256));
+      if(intel.version){const v=intel.version;details.append(this.node('p','file-version-reason',v.reason+(v.preferredName?' · candidate: '+v.preferredName:'')+' Distinct contents are retained.'));
+        for(const [label,date] of [['Modified',f.updated],['Uploaded / created',f.uploaded || f.created],['First modified',f.firstModified]])if(epoch(date))details.append(this.node('small',null,label+': '+sourceDate(date).toLocaleString()));}
       if(f.routesTried?.length)details.append(this.node('small','file-route',f.routesTried.map(r=>r.route+' · HTTP '+r.status).join('\n')));
       for(const cid of f.conversationIds || []){const chat=this.node('a','file-source','Source chat ↗');chat.href='https://chatgpt.com/c/'+encodeURIComponent(cid);chat.target='_blank';chat.rel='noopener';details.append(chat);}
       row.append(icon,info,status,actions,details);fragment.append(row);

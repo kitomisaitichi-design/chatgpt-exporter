@@ -1,4 +1,4 @@
-export const VERSION = '2.4.2';
+export const VERSION = '2.4.3';
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const freshPace = () => ({delay:5000, floor:5000, next:0, until:0, strikes:0, ok:0, recent:[], lastLimit:0, tier:0, tierChangedAt:0, idleRelaxAt:0, stableSince:0, regimes:[]});
 // Tiers are the network cadence. Local disk/cache work never consumes these delays.
@@ -119,7 +119,7 @@ export function markdown(data, id) {
   return lines.join('\n');
 }
 export function newJob(scope, options={}, now = Date.now()) {
-  const merged={archived:true,projects:true,assist:false,verify:true,mode:'index-first',attachments:true,passive:true,passiveHours:3,yieldUser:true,library:true,smartWatch:true,...options};
+  const merged={archived:true,projects:true,assist:false,verify:true,mode:'index-first',attachments:true,downloadImages:true,passive:true,passiveHours:3,yieldUser:true,library:true,smartWatch:true,...options};
   return {version:VERSION, scope, created:now, updated:now, status:'ready', message:'Ready', options:merged, entries:{}, sources:[
     {key:'active', kind:'list', offset:0, done:false, seenPages:[], emptyChecks:0},
     ...(merged.archived ? [{key:'archived', kind:'list', offset:0, archived:true, done:false, seenPages:[], emptyChecks:0}] : []),
@@ -189,13 +189,14 @@ export function counts(job) {
   return {total:entries.length, saved:entries.filter(e => e.status === 'saved').length, pending:entries.filter(e => e.status === 'pending').length, failed:entries.filter(e => e.status === 'failed').length, changed:entries.filter(e=>e.revisionCount>0).length,attachments:entries.reduce((n,e)=>n+(e.attachments?.filter?.(a=>a.status==='saved').length || 0),0), discovery:(job?.sources?.filter(s => s.error || !s.done).length || 0)+(job?.discoveryUncertain?1:0)};
 }
 const DOC_EXT=new Set(['txt','md','markdown','doc','docx','xls','xlsx','xlsm','csv','tsv','html','htm','rtf','odt','ods','pdf','json','jsonl','yaml','yml','toml','xml','css','scss','less','py','js','mjs','cjs','ts','tsx','jsx','sql','ipynb','java','c','cc','cpp','h','hpp','cs','go','rs','rb','php','sh','bash','zsh','ps1','bat','cmd','ini','cfg','conf','env','log','tex','r','rmd','swift','kt','kts','dart','vue','svelte']);
+const IMAGE_EXT=new Set(['png','jpg','jpeg','gif','webp','avif','bmp','svg','ico','tif','tiff','heic','heif','jxl']);
 function pointerId(value){if(typeof value!=='string')return null;const m=value.match(/(?:file-service:\/\/|\/files\/download\/)([a-zA-Z0-9_-]{8,200})/);return m?.[1] || (/^[a-zA-Z0-9_-]{8,200}$/.test(value)?value:null);}
 function attachmentFrom(a,nodeId,partIndex){
   if(!a || typeof a!=='object')return null;
   const name=a.name || a.filename || a.file_name || a.title || `attachment-${partIndex ?? 0}`;
   const ext=String(name).split('.').pop()?.toLowerCase();
-  const mime=a.mime_type || a.mime || a.content_type || '';
-  if(!(DOC_EXT.has(ext) || /^(?:text\/|application\/(?:json|xml|rtf|pdf|msword|vnd\.|octet-stream))/.test(mime)))return null;
+  const mime=a.mime_type || a.mime || (a.content_type==='image_asset_pointer'?'image/unknown':a.content_type) || '';
+  if(!(DOC_EXT.has(ext) || IMAGE_EXT.has(ext) || /^(?:image\/|text\/|application\/(?:json|xml|rtf|pdf|msword|vnd\.|octet-stream))/.test(mime)))return null;
   const size=Number(a.size || a.file_size || a.bytes || 0) || null;
   const rawId=a.file_id || a.id || a.asset_pointer || a.asset_id || null;
   const id=pointerId(rawId) || pointerId(a.asset_pointer);

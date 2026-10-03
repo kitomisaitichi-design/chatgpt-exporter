@@ -1,6 +1,6 @@
 // Same-origin/read-only ChatGPT bridge. Authentication remains inside ChatGPT.
 (() => {
-  if (window.__englishExporterBridgeV242) return;
+  if (window.__englishExporterBridgeV243) return;
   const originalFetch = window.fetch.bind(window);
   const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map(), changedChats=new Map(), libraryItems=new Map(),libraryRoutes=new Map();
   const documentId=crypto.randomUUID(), loadedAt=Date.now();
@@ -81,7 +81,8 @@
   }
   const matches = expected => expected && expected.user === user && (expected.account || null) === workspace();
   function authHeaders(scope){const headers={...Object.fromEntries(frontendHeaders),accept:'*/*',authorization:`Bearer ${token}`,'oai-language':'en-US'};const did=cookie('oai-did') || device;if(did){headers['oai-device-id']=did;headers['oai-did']=did;}if(scope.account)headers['chatgpt-account-id']=scope.account;if(pending)headers['x-oai-is-pending-updates']=pending;return headers;}
-  async function fetchAssetCandidate(candidate,scope,maxBytes,visited=new Set(),deadline=Date.now()+60000){
+  const imageName=name=>/\.(?:png|jpe?g|gif|webp|avif|bmp|svg|ico|tiff?|heic|heif|jxl)$/i.test(String(name || ''));
+  async function fetchAssetCandidate(candidate,scope,maxBytes,visited=new Set(),deadline=Date.now()+60000,excludeImages=false){
     let url;try{url=new URL(candidate,location.origin);}catch{return null;}
     if(!['https:'].includes(url.protocol))return null;
     if(visited.has(url.href) || visited.size>=4)return {status:502,error:'Attachment download-link cycle or excessive redirects.'};visited.add(url.href);
@@ -91,6 +92,8 @@
     if(!response.ok)return {status:response.status,retryAfter:response.headers.get('retry-after')};
     const length=Number(response.headers.get('content-length') || 0);if(length>maxBytes){await response.body?.cancel().catch(()=>{});return {tooLarge:true,size:length};}
     const type=response.headers.get('content-type') || '';
+    const dispositionName=response.headers.get('content-disposition')?.match(/filename\s*=\s*"?([^";]+)/i)?.[1]?.trim();
+    if(excludeImages && (/^image\//i.test(type) || imageName(dispositionName))){await response.body?.cancel().catch(()=>{});return {imageExcluded:true,type};}
     const chunks=[];let size=0;
     if(response.body){const reader=response.body.getReader();try{for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>maxBytes){await reader.cancel().catch(()=>{});return {tooLarge:true,size};}chunks.push(part.value);}}finally{reader.releaseLock();}}
     else{const bytes=new Uint8Array(await response.arrayBuffer());size=bytes.length;if(size>maxBytes)return {tooLarge:true,size};chunks.push(bytes);}
@@ -100,7 +103,7 @@
       if(obj){
         if(obj.status==='error' || obj.error_code || obj.error_type || obj.error && url.origin===location.origin)return {status:/not_found|missing/i.test(String(obj.error_code || obj.error_type || obj.error))?404:502,error:String(obj.error_code || obj.error_type || 'Attachment service returned an error instead of a file.')};
         const next=obj.download_url || obj.download_link || obj.downloadUrl || (obj.status==='success'?obj.url:null);
-        if(next){const declared=Number(obj.file_size_bytes ?? obj.file_size ?? obj.size_bytes ?? 0);if(declared>maxBytes)return {tooLarge:true,size:declared};return await fetchAssetCandidate(next,scope,maxBytes,visited,deadline);}
+        if(next){if(excludeImages && (/^image\//i.test(obj.mime_type || obj.content_type || obj.metadata?.mime_type || '') || imageName(obj.file_name || obj.filename || obj.metadata?.file_name)))return {imageExcluded:true,type:obj.mime_type || obj.content_type || obj.metadata?.mime_type || 'image/unknown'};const declared=Number(obj.file_size_bytes ?? obj.file_size ?? obj.size_bytes ?? 0);if(declared>maxBytes)return {tooLarge:true,size:declared};return await fetchAssetCandidate(next,scope,maxBytes,visited,deadline,excludeImages);}
         if(obj.status==='success' && url.pathname!=='/backend-api/estuary/content')return {status:502,error:'Attachment link response contained no download URL.'};
       }
     }
@@ -130,7 +133,7 @@
         const max=Math.min(10*1024*1024,Math.max(1,Number(args.maxBytes)||10*1024*1024)),candidates=[...(args.candidates || [])];
         const libraryRoute=args.library&&args.fileId?libraryRoutes.get(args.fileId):null;if(libraryRoute&&scoped(libraryRoute))candidates.unshift(libraryRoute.url);
         const remembered=args.fileId?fileRoutes.get(args.fileId):null;if(remembered?.path && (!remembered.scope?.user || remembered.scope.user===args.scope.user))candidates.unshift(remembered.path);
-        const deadline=Date.now()+60000;let last=null;const attempts=[];for(const candidate of [...new Set(candidates)].slice(0,5)){const got=await fetchAssetCandidate(candidate,args.scope,max,new Set(),deadline);if(!got)continue;attempts.push({route:new URL(candidate,location.origin).pathname,status:got.status || (got.tooLarge?413:200)});if(got.status===429 || got.status===401)return {ok:false,status:got.status,retryAfter:got.retryAfter,error:got.error,attempts};if(got.status){last=got;continue;}if(got.tooLarge)return {ok:false,status:413,size:got.size,error:'Attachment exceeds the 10 MB limit.',attempts};const key=crypto.randomUUID();preparedAssets.set(key,{...got,at:Date.now(),ownerUser:args.scope.user});while(preparedAssets.size>3)preparedAssets.delete(preparedAssets.keys().next().value);return {ok:true,status:200,key,size:got.size,type:got.type,disposition:got.disposition,attempts};}return {ok:false,status:last?.status || 404,error:last?.error || 'No readable attachment download route was available.',attempts};
+        const deadline=Date.now()+60000;let last=null;const attempts=[];for(const candidate of [...new Set(candidates)].slice(0,5)){const got=await fetchAssetCandidate(candidate,args.scope,max,new Set(),deadline,args.excludeImages===true);if(!got)continue;attempts.push({route:new URL(candidate,location.origin).pathname,status:got.status || (got.tooLarge?413:200)});if(got.status===429 || got.status===401)return {ok:false,status:got.status,retryAfter:got.retryAfter,error:got.error,attempts};if(got.status){last=got;continue;}if(got.imageExcluded)return {ok:false,status:200,imageExcluded:true,type:got.type,error:'Image downloads are switched off.',attempts};if(got.tooLarge)return {ok:false,status:413,size:got.size,error:'Attachment exceeds the 10 MB limit.',attempts};const key=crypto.randomUUID();preparedAssets.set(key,{...got,at:Date.now(),ownerUser:args.scope.user});while(preparedAssets.size>3)preparedAssets.delete(preparedAssets.keys().next().value);return {ok:true,status:200,key,size:got.size,type:got.type,disposition:got.disposition,attempts};}return {ok:false,status:last?.status || 404,error:last?.error || 'No readable attachment download route was available.',attempts};
       }
       // assetPrepare already authenticated and fetched the bytes. Chunking/releasing
       // those prepared bytes is local page-memory work, so a volatile workspace
@@ -154,9 +157,10 @@
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV242',{value:{rpc,version:'2.4.2'}, configurable:false,writable:false});
-  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV242});
-  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV242});
+  Object.defineProperty(window,'__englishExporterBridgeV243',{value:{rpc,version:'2.4.3'}, configurable:false,writable:false});
+  if(!window.__englishExporterBridgeV242)Object.defineProperty(window,'__englishExporterBridgeV242',{value:window.__englishExporterBridgeV243});
+  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV243});
+  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV243});
 })();
 
 
