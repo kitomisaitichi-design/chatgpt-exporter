@@ -6,7 +6,7 @@ Build a local backup of the conversations available to your signed-in ChatGPT we
 
 [Download v2.4.3](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.3) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-**Viewer compatibility:** Exporter **2.4.3 remains interoperable with [Offline Chat Viewer 1.1.4](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/tag/v1.1.4)**, including the new shared-content file layout. Select the complete backup root in the Viewer and open **Files & Library**.
+**Viewer compatibility:** Exporter **2.4.3 remains interoperable with [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)**, including the new shared-content file layout. The current release is **1.1.6**; the download link follows the latest release. Select the complete backup root in the Viewer and open **Files & Library**.
 
 ## Smart file reuse and version scan
 
@@ -22,7 +22,7 @@ Filters include **Identical content**, **Version families**, **Preferred version
 
 ## Library files in your Viewer
 
-Use [Offline Chat Viewer 1.1.4](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/tag/v1.1.4), select this backup's root folder, then open **Files & Library**. It reads `conversation-index.json` and `attachments/library-index.json`, opens saved files and their source chats, and filters files for the selected conversation. For files at or above **10,000,000 bytes**, use the ChatGPT link to download them yourself, then **Import downloaded copy** in the Viewer. The Viewer copies a size-checked file into its expected backup path and keeps any existing copy. Importing a file does not rebuild message indexes.
+Use [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest), select this backup's root folder, then open **Files & Library**. It reads `conversation-index.json` and `attachments/library-index.json`, opens saved files and their source chats, and filters files for the selected conversation. For files at or above **10,000,000 bytes**, use the ChatGPT link to download them yourself, then **Import downloaded copy** in the Viewer. The Viewer copies a size-checked file into its expected backup path and keeps any existing copy. Importing a file does not rebuild message indexes.
 
 v2.4.3 follows the native Library `cursor`, keeps scanning after unsupported entries, catalogs mounted folders without aborting owned-file discovery, and preserves `origination_thread_id` as a source-chat link. File downloads try the observed native no-query route first and retain the frontend headers observed in the signed-in tab. Each file has **two failed transfer attempts**, then stays parked across scans, metadata changes, restarts and portable-state restores until you explicitly retry it.
 
@@ -38,7 +38,7 @@ Validation: **90 exporter regression tests**. Isolated Edge integration uses nat
 - Add **Deduplicate & smart scan** for existing saved files, with reference-first persistence, revalidation before redundant-copy removal, interruption recovery and an exported audit journal.
 - Add version families, preferred/earlier labels, review suggestions, evidence in details and dedicated filters. Keep all distinct versions.
 - Add **Download images** for Library and chat attachments, including discoverable chat image pointers, persisted preferences, manual listings and resume when enabled.
-- Keep two-attempt failure parking, full Library pagination, Stop/hold, the strict Library byte limit, passive checks and Viewer 1.1.4 compatibility.
+- Keep two-attempt failure parking, full Library pagination, Stop/hold, the strict Library byte limit, passive checks and the current Viewer catalog formats.
 
 Upgrade in the **same folder** to retain the queue and cache. Saved conversation JSON is rescanned once to discover newly supported images; existing valid files and hard attachment-failure decisions are retained. Details: `CHANGELOG-v2.4.3.md`.
 
@@ -127,9 +127,9 @@ New binaries use `attachments/content/<sha256>/<first-name>`, so different conte
 
 Point your **kitomisaitichi-design/chatgpt-viewer** at the complete backup folder, keeping `conversation-index.json`, `json/`, `markdown/` and `attachments/` together. Existing native conversation JSON, branches, IDs, timestamps, classifications and basenames keep their format. The conversation index attaches Library files where a source conversation ID is available. Unlinked Library files stay in the file catalog; they are not invented conversations.
 
-Exporter 2.4.3 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. New hash-alias, version-evidence and image-preference fields are additive. Viewer 1.1.4 uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<first-name>` shared copies.
+Exporter 2.4.3 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. New hash-alias, version-evidence and image-preference fields are additive. Viewer 1.1.6 retains the file catalog reader and uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<first-name>` shared copies.
 
-| Exporter feature | Behavior with Viewer 1.1.4 |
+| Exporter feature | Viewer behavior |
 | --- | --- |
 | Identical content under different names / IDs | Catalog entries retain their names, IDs and chat links while opening the same saved binary. |
 | Deduplicate & smart scan | Updated conversation and Library catalogs point to the surviving verified copy before redundant bytes are removed. Reopen Files & Library to refresh the catalog. |
@@ -137,9 +137,9 @@ Exporter 2.4.3 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-ind
 | Download images switched off | Already saved images remain available; excluded images remain cataloged for manual access. Enabling downloads resumes eligible images. |
 | Files at or above 10 MB | Download through the listed ChatGPT link, then use **Import downloaded copy** in the Viewer. Saved file downloads and source-chat navigation use the existing Viewer workflow. |
 
-Keep the complete backup together: the Viewer needs the indexes and actual `attachments/` binaries. The cached-chat ZIP contains transcripts and metadata; compress the complete backup folder when transferring files between computers. Version 2.4.3's isolated exporter-to-Viewer check verified catalog loading, saved file bytes, source-chat navigation, selected-chat filtering and manual-file import without rebuilding chat indexes.
+Keep the complete backup together: the Viewer needs the indexes and actual `attachments/` binaries. The cached-chat ZIP contains transcripts and metadata; compress the complete backup folder when transferring files between computers. The earlier isolated exporter-to-Viewer check used Viewer 1.1.4 to verify catalog loading, saved file bytes, source-chat navigation, selected-chat filtering and manual-file import without rebuilding chat indexes. The current release is **Viewer 1.1.6**; its published documentation and file-catalog source retain these schemas and workflows. A fresh end-to-end run against 1.1.6 has not been performed for this README correction.
 
-Viewer 1.1.4 reads the native conversation index and Library file catalog together. Use its Files & Library panel to browse local files and import manual downloads. The saved HTML catalogs remain available without the Viewer. The cached-chat ZIP remains a transcript export; compress the full backup folder to include Library binaries.
+The current Viewer reads the native conversation index and Library file catalog together. Its chat Files control adds text/image previews and original-path access; its Library control retains manual downloaded-copy imports. Use its Files & Library panel to browse local files and import manual downloads. The saved HTML catalogs remain available without the Viewer. The cached-chat ZIP remains a transcript export; compress the full backup folder to include Library binaries.
 
 ## Activity controls
 
