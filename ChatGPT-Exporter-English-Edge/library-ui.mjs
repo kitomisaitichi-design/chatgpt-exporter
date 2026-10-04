@@ -1,13 +1,13 @@
 import {createLibraryView} from './library-view.mjs';
 import {LIBRARY_FAILURE_LIMIT} from './library.mjs';
 import {analyzeFiles} from './file-intelligence.mjs';
-import {epoch} from './core.mjs';
+import {epoch,compareText} from './core.mjs';
 
 export const fileSize=n=>n==null?'Unknown size':n<1000?n+' B':n<1_000_000?(n/1000).toFixed(1)+' KB':(n/1_000_000).toFixed(2)+' MB';
 const sourceDate=value=>new Date(typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)?value+'T12:00:00':epoch(value));
 export function selectLibraryFiles(files,{search='',filter='all',sort='recent',page=0,pageSize=50,analysis=analyzeFiles(files)}={}) {
   const q=search.trim().toLocaleLowerCase(),selected=files.filter(f=>(!q||(f.name+' '+f.id).toLocaleLowerCase().includes(q)) && (filter==='all' || filter==='both'&&new Set((f.sourceRefs || []).map(r=>r.kind)).size===2 || filter==='chat-only'&&(f.sourceRefs || []).some(r=>r.kind==='chat')&&!(f.sourceRefs || []).some(r=>r.kind==='library') || filter==='retained'&&(f.sourceRefs || []).some(r=>r.presence!=='observed') || filter==='duplicates'&&(analysis.get(f.id)?.duplicate || f.duplicate) || filter==='versions'&&analysis.get(f.id)?.version || filter==='preferred'&&analysis.get(f.id)?.version?.role==='preferred' || filter==='images-off'&&f.imageExcluded || filter==='manual'&&f.status==='manual' || filter==='saved'&&f.status==='saved' || filter==='parked'&&f.parked || filter==='pending'&&['pending','deferred'].includes(f.status)&&!f.parked || filter==='attention'&&!['saved','manual'].includes(f.status)));
-  selected.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='size'?(b.size??-1)-(a.size??-1):sort==='status'?a.status.localeCompare(b.status)||a.name.localeCompare(b.name):(epoch(b.updated)||epoch(b.uploaded)||epoch(b.created))-(epoch(a.updated)||epoch(a.uploaded)||epoch(a.created))||a.name.localeCompare(b.name));
+  selected.sort((a,b)=>sort==='name'?compareText(a.name,b.name):sort==='size'?(b.size??-1)-(a.size??-1):sort==='status'?compareText(a.status,b.status)||compareText(a.name,b.name):(epoch(b.updated)||epoch(b.uploaded)||epoch(b.created))-(epoch(a.updated)||epoch(a.uploaded)||epoch(a.created))||compareText(a.name,b.name));
   const size=pageSize==='all'?Math.max(1,Math.min(500,selected.length)):Math.max(1,Number(pageSize)||50),pages=Math.max(1,Math.ceil(selected.length/size)),current=Math.max(0,Math.min(pages-1,page));
   return {files:selected.slice(current*size,(current+1)*size),total:selected.length,page:current,pages,start:selected.length?current*size+1:0,end:Math.min(selected.length,(current+1)*size)};
 }
@@ -43,7 +43,7 @@ export class LibraryPanel {
     const container=this.$('library-files'),expanded=new Set([...container.querySelectorAll('article[data-file-key]')].filter(row=>row.querySelector('details')?.open).map(row=>row.dataset.fileKey)),active=this.doc.activeElement,focusKey=active?.closest('.library-row')?.dataset.fileKey,focusSelector=active?.matches('summary')?'summary':active?.matches('[data-retry]')?'[data-retry]':active?.matches('.file-open')?'.file-open':null;
     container.className='library-files '+this.view;const fragment=this.doc.createDocumentFragment();
     for(const f of result.files){
-      const row=this.node('article','library-row'),icon=this.node('span','file-icon',(f.name.split('.').at(-1) || 'FILE').slice(0,5).toUpperCase());icon.setAttribute('aria-hidden','true');
+      const row=this.node('article','library-row'),icon=this.node('span','file-icon',(String(f.name || f.id || 'file').split('.').at(-1) || 'FILE').slice(0,5).toUpperCase());icon.setAttribute('aria-hidden','true');
       const intel=analysis.get(f.id) || {},info=this.node('div','file-info'),name=this.node('strong','file-name',f.name),date=f.updated || f.uploaded || f.created,meta=this.node('span','file-meta',fileSize(f.size)+(epoch(date)?' · '+sourceDate(date).toLocaleDateString():''));info.append(name,meta);
       if(intel.version){const v=intel.version,badge=this.node('span','file-version',({preferred:'Preferred version',earlier:'Earlier version',identical:'Same content','larger-candidate':'Larger · review',review:'Version · review'}[v.role]));badge.dataset.role=v.role;info.append(badge);}
       const status=this.node('span','file-badge',label(f));status.dataset.status=f.parked?'parked':f.status;

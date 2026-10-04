@@ -1,6 +1,6 @@
 import {fileReferences,relatedFiles,compatibleFile,rememberFileResult} from './file-links.mjs';
 export {fileReferences} from './file-links.mjs';
-import {epoch,safeName,attachmentError,ATTACHMENT_MAX_BYTES} from './core.mjs';
+import {epoch,safeName,attachmentError,ATTACHMENT_MAX_BYTES,compareText} from './core.mjs';
 
 export const validHash=value=>typeof value==='string' && /^[a-f0-9]{64}$/i.test(value)?value.toLowerCase():null;
 export const isImage=file=>/^image\//i.test(file?.mime || file?.mime_type || '') || /\.(?:png|jpe?g|gif|webp|avif|bmp|svg|ico|tiff?|heic|heif|jxl)$/i.test(file?.name || '');
@@ -26,7 +26,7 @@ export function fileFamily(file){
 export function analyzeFiles(files){
   const info=new Map(),families=new Map(),hashes=new Map();
   for(const f of files){info.set(f.id,{});const family=fileFamily(f);if(family.name){const list=families.get(family.key) || [];list.push({...family,file:f});families.set(family.key,list);}const hash=validHash(f.sha256);if(hash){const list=hashes.get(hash) || [];list.push(f);hashes.set(hash,list);}}
-  for(const [hash,list] of hashes)if(list.length>1){const canonical=[...list].sort((a,b)=>Number(!!a.duplicateOf)-Number(!!b.duplicateOf) || (a.savedAt || Infinity)-(b.savedAt || Infinity) || a.id.localeCompare(b.id))[0];for(const f of list)info.get(f.id).duplicate={canonicalId:canonical.id,canonicalName:canonical.name,hash,count:list.length,sharedPath:canonical.path || null,isAlias:f.id!==canonical.id};}
+  for(const [hash,list] of hashes)if(list.length>1){const canonical=[...list].sort((a,b)=>Number(!!a.duplicateOf)-Number(!!b.duplicateOf) || (a.savedAt || Infinity)-(b.savedAt || Infinity) || compareText(a.id ?? a.sourceKey ?? a.name,b.id ?? b.sourceKey ?? b.name))[0];for(const f of list)info.get(f.id).duplicate={canonicalId:canonical.id,canonicalName:canonical.name,hash,count:list.length,sharedPath:canonical.path || null,isAlias:f.id!==canonical.id};}
   for(const list of families.values()){
     if(list.length<2)continue;
     const verified=list.map(x=>validHash(x.file.sha256)),identical=verified.every(Boolean)&&new Set(verified).size===1;
