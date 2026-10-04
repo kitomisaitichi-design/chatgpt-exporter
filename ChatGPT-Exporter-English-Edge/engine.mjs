@@ -1,4 +1,5 @@
 import {seedFileSources,observeFileSource,observeChatFiles,fileReferences,sharedFileBudget,markChatSourceUnavailable,createFileLookup} from './file-links.mjs';
+import {pickWork,beginWork,finishWork,assetsMustYield,schedulerState,libraryPolicy} from './work-scheduler.mjs';
 import {libraryState,queueLibraryScan,libraryWork,processLibrary,mergeLibraryItem,normalizeLibraryItem} from './library.mjs';
 import {appendEvent} from './logs.mjs';
 import {VERSION,WEEKLY_BROKEN_MS,counts, limited, succeeded, relaxIdle, sourcePath, ingestPage, conversationValid, safeName, markdown,mergeEntry,validId,calendarTime,conversationTime,classifyConversation,extractAttachments,epoch} from './core.mjs';
@@ -70,7 +71,7 @@ export class Engine {
       await this.holdPoint();
       if(this.io.online && !this.io.online()){a.state='offline';a.reason='Internet connection is offline. Local progress is safe; network work resumes when online.';a.waitUntil=this.now()+30000;await this.wait(a.waitUntil,a.reason);continue;}
       const snapshots=await this.observe(),decision=decide(this.job,snapshots,kind,this.now(),waitingSince);
-      if(kind==='asset' && (Object.values(this.job.entries).some(e=>e.status==='pending' && (!e.retryAt || e.retryAt<=this.now())) || this.job.sources.some(s=>!s.done&&!s.error)))throw new YieldAttachments('Attachment wait yielded to queued chat updates.');
+      if(kind==='asset' && assetsMustYield(this.job,this.now()))throw new YieldAttachments('Attachment wait yielded to queued chat updates.');
       a.state=decision.state;a.reason=decision.reason;a.waitUntil=decision.until;this.job.message=decision.reason;this.io.changed?.(this.job);
       if(decision.attention)throw new Paused(decision.reason);if(decision.probeRequired)return false;
       if(!decision.until){recordAction(this.job,kind,this.now());if(decision.gentle)a.probe=true;await this.save();return true;}
@@ -134,6 +135,7 @@ export class Engine {
     this.job.recentDone.push(this.now());this.job.recentDone=this.job.recentDone.slice(-30);this.job.phase=null;this.event(`${usedLocal?'Recovered/wrote local backup':'Downloaded'}: ${entry.title}`);await this.save();await this.io.report(this.job);
   }
   async processAttachments(entry) {
+    this.attachmentTurnSaved=false;const savedBefore=new Set((entry.attachments || []).filter(f=>f.status==='saved').map(f=>`${f.id}:${f.path}:${f.sha256}`));
     entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;
     const key=`${this.job.scope.key}:${entry.id}`;let cached=await this.io.cacheGet(key);if(!cached?.data && this.io.diskRead)cached=await this.io.diskRead(entry.id);
     if(!cached?.data){entry.attachmentPending=false;entry.attachmentScannedAt=this.now();await this.save();return;}
@@ -141,12 +143,12 @@ export class Engine {
     if(!eligible.length){entry.attachmentPending=false;entry.attachmentRetryAt=0;entry.attachmentScannedAt=this.now();await this.save();await this.io.report(this.job);return;}
     this.job.phase='attachments';this.job.message=`Retrieving ${eligible.length} eligible attachment${eligible.length===1?'':'s'}: ${entry.title}`;await this.save();
     try {
-      const urgent=()=>Object.values(this.job.entries).some(e=>e.status==='pending' && (!e.retryAt || e.retryAt<=this.now())) || this.job.sources.some(s=>!s.done && !s.error);
-      const attachments=await this.io.attachments(entry,cached.data,entry.basename || entry.id,async()=>{await this.observe();if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');if(await this.paceRequest('asset')===false)throw new Paused('A read check is required before attachment recovery.');if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');});
-      if(attachments.length)entry.attachments=attachments;entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;const retryable=attachments.filter(a=>a.status==='rate-limited' || a.status==='deferred');entry.attachmentPending=retryable.length>0;entry.attachmentRetryAt=entry.attachmentPending?this.now()+(attachments.some(a=>a.yielded)?60000:6*3600000):0;entry.attachmentScannedAt=this.now();
+      const urgent=()=>assetsMustYield(this.job,this.now());
+      const attachments=await this.io.attachments(entry,cached.data,entry.basename || entry.id,async()=>{await this.observe();if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');if(await this.paceRequest('asset')===false)throw new Paused('A read check is required before attachment recovery.');if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');},{maxTransfers:1,maxItems:25});
+      if(attachments.length)entry.attachments=attachments;this.attachmentTurnSaved=attachments.some(f=>f.status==='saved'&&!savedBefore.has(`${f.id}:${f.path}:${f.sha256}`));entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;const retryable=attachments.filter(a=>a.status==='rate-limited' || a.status==='deferred');entry.attachmentPending=retryable.length>0;entry.attachmentRetryAt=entry.attachmentPending?this.now()+(attachments.some(a=>a.batchPending)?0:attachments.some(a=>a.yielded)?60000:attachments.some(a=>a.status==='rate-limited')?120000:6*3600000):0;entry.attachmentScannedAt=this.now();
       if(attachments.length){const local=attachments.filter(a=>a.status==='saved' && a.source!=='network').length,network=attachments.filter(a=>a.status==='saved' && a.source==='network').length,unavailable=attachments.filter(a=>['unavailable','permission-unavailable'].includes(a.status)).length,large=attachments.filter(a=>a.status==='skipped-too-large').length,deferred=retryable.length;if(network){const before=this.job.pace.tier || 0;for(let i=0;i<network;i++){succeeded(this.job.pace,this.now());recordSuccess(this.job,this.now());}if((this.job.pace.tier || 0)<before)this.event(`Successful attachment reads stepped pacing down to tier ${this.job.pace.tier}.`);}this.event(`Attachment pass: ${entry.title} — ${local} local, ${network} downloaded, ${unavailable} unavailable${large?`, ${large} too large`:''}${deferred?`, ${deferred} retryable`:''}.`);}else this.event(`Attachment pass: ${entry.title} — no eligible files.`);
     } catch(e){if(e instanceof Paused)throw e;entry.attachmentPending=true;entry.attachmentRetryAt=this.now()+6*3600000;entry.attachmentScannedAt=this.now();this.event(`Attachment pass transiently deferred: ${entry.title} — ${e.message || e}`);}
-    this.job.phase=null;await this.save();await this.io.report(this.job);
+    entry.attachmentLastTurnAt=this.now();this.job.phase=null;await this.save();await this.io.report(this.job);
   }
   async discover(source) {
     this.job.message=`Discovering ${source.title || source.key} chats…`;await this.save();
@@ -170,35 +172,48 @@ export class Engine {
     this.stopped=false;this.libraryChecked=new Set();this.job.status='running';this.job.started=true;this.job.version=VERSION;await this.save();
     try {
       await this.reconcileInventory(await this.io.inventory?.(this.job.scope) || []);await this.observe();
-      this.job.discoveryAudit ||= {round:0,baseline:Object.keys(this.job.entries).length,stable:false};let readsSincePage=0;
+      this.job.discoveryAudit ||= {round:0,baseline:Object.keys(this.job.entries).length,stable:false};schedulerState(this.job,this.now());
       for (;;) {
         await this.holdPoint();await this.observe();
         const pending=Object.values(this.job.entries).filter(e=>e.status==='pending'),eligible=pending.filter(e=>!e.retryAt || e.retryAt<=this.now()).sort((a,b)=>calendarTime(a)-calendarTime(b) || String(a.id).localeCompare(String(b.id)));
-        const indexOnly=this.job.options.mode==='index-only',indexFirst=this.job.options.mode==='index-first';
+        const indexOnly=this.job.options.mode==='index-only';
         const urgentReady=eligible.find(e=>e.refresh && (e.nativeWriteAt || e.changeReason)),ready=indexOnly?null:urgentReady || eligible.find(e=>this.cachedIds.has(e.id)&&!e.refresh) || eligible.find(e=>!e.recoveryPending) || eligible[0];
         const source=this.job.sources.filter(s=>!s.done && !s.error).sort((a,b)=>(a.lastPageAt || 0)-(b.lastPageAt || 0))[0],localReady=ready && this.cachedIds.has(ready.id) && !ready.refresh;
-        if (ready && (!source || localReady || urgentReady===ready || !indexFirst && readsSincePage<3)) {
-          try{await this.process(ready);}catch(error){
-            if(error instanceof Paused || ['NotAllowedError','SecurityError','QuotaExceededError'].includes(error.name))throw error;
-            ready.attempts=(ready.attempts || 0)+1;ready.status=ready.attempts>=3?'failed':'pending';ready.retryAt=ready.status==='pending'?this.now()+60000*ready.attempts:0;ready.error=error.message || String(error);this.job.phase=null;
-            this.event(`File work ${ready.status==='failed'?'needs attention':'deferred'}: ${ready.title} — ${ready.error}. Continuing other chats.`);await this.save();
-          }
-          readsSincePage++;continue;
-        }
-        if (source) {await this.discover(source);readsSincePage=0;continue;}
+        const repair=this.job.options.verify!==false?this.job.sources.find(s=>s.error&&(s.failures || 0)<=2&&(s.retryAt || 0)<=this.now()):null;
+        const attachment=!indexOnly&&this.job.options.attachments!==false?Object.values(this.job.entries).filter(e=>e.status==='saved'&&(!e.attachmentScannedAt||e.attachmentPending)&&(e.attachmentRetryAt || 0)<=this.now()).sort((a,b)=>(a.attachmentLastTurnAt || 0)-(b.attachmentLastTurnAt || 0)||calendarTime(a)-calendarTime(b))[0]:null;
+        const verifyKey=f=>`${f.path}:${f.size}:${f.sha256 || ''}`;
+        const verify=!indexOnly&&this.io.libraryList&&this.job.options.library&&this.io.libraryVerify?fileReferences(this.job).find(f=>f.status==='saved'&&f.path&&!this.libraryChecked.has(verifyKey(f))):null;
+        const library=!indexOnly&&this.io.libraryList&&this.job.options.library?libraryWork(this.job,this.now()):null;
+        let recent=null;
         if(watchCheckDue(this.job,this.now())){
-          const plan=decide(this.job,await this.observe(),'discovery',this.now());
-          if(!plan.until && !plan.attention){await this.checkRecentChats();continue;}
-          this.job.schedule.checkState=plan.attention?'needs-attention':'waiting';this.job.schedule.checkWaitReason=plan.reason;this.job.schedule.checkWaitUntil=plan.until || 0;
+          const plan=decide(this.job,[],'discovery',this.now());
+          if(!plan.attention&&(!plan.until||['spacing','traffic-rest'].includes(plan.state)))recent=true;
+          else {this.job.schedule.checkState=plan.attention?'needs-attention':'waiting';this.job.schedule.checkWaitReason=plan.reason;this.job.schedule.checkWaitUntil=plan.until || 0;}
         }
-        const repair=this.job.options.verify!==false?this.job.sources.find(s=>s.error && (s.failures || 0)<=2 && (s.retryAt || 0)<=this.now()):null;if(repair){Object.assign(repair,{error:null,done:false,offset:0,cursor:repair.kind==='project'?'0':null,seenPages:[],uniqueIds:[],emptyChecks:0,reportedTotal:0});this.event(`Repairing only the incomplete discovery route: ${repair.title || repair.key}.`);await this.save();continue;}
-        // Productive saved-file work should continue while an incomplete discovery route
-        // is merely waiting for its retry time. Do not idle just to service verification.
-        if(this.job.options.attachments!==false){const attachment=Object.values(this.job.entries).filter(e=>e.status==='saved' && (!e.attachmentScannedAt || e.attachmentPending) && (!e.attachmentRetryAt || e.attachmentRetryAt<=this.now())).sort((a,b)=>calendarTime(a)-calendarTime(b))[0];if(attachment){await this.processAttachments(attachment);continue;}}
-        if(this.io.libraryList && this.job.options.library){
-          const saved=this.io.libraryVerify && fileReferences(this.job).find(f=>f.status==='saved'&&f.path&&!this.libraryChecked.has((f.sourceKey || f.id)+':'+f.path));
-          if(saved){this.libraryChecked.add((saved.sourceKey || saved.id)+':'+saved.path);if(!await this.io.libraryVerify(saved)){saved.status=saved.historical?'unavailable':'pending';saved.path=null;saved.retryAt=0;this.event(`Library saved copy needs repair: ${saved.name}.`,'warn','library');await this.save();}continue;}
-          const work=libraryWork(this.job,this.now());if(work){await processLibrary(this,work);continue;}
+        const decision=pickWork(this.job,{chat:ready,'chat-scan':source || repair,attachment,library,verify,recent},{urgent:urgentReady===ready&&!!ready,local:!!localReady,now:this.now()});
+        if(decision){
+          beginWork(this.job,decision,this.now());
+          if(decision.lane==='library'){const share=schedulerState(this.job,this.now()).library;const policy=libraryPolicy(this.job,this.now());if(share.loggedShare!==policy.downloadShare){share.loggedShare=policy.downloadShare;this.event(`Queue policy: ${policy.downloadShare}% Library download turns while both Library queues are ready. ${policy.reason}`,'info','library');}}
+          this.io.changed?.(this.job);
+          if(decision.lane==='chat'){
+            try{await this.process(ready);}catch(error){
+              if(error instanceof Paused || ['NotAllowedError','SecurityError','QuotaExceededError'].includes(error.name))throw error;
+              ready.attempts=(ready.attempts || 0)+1;ready.status=ready.attempts>=3?'failed':'pending';ready.retryAt=ready.status==='pending'?this.now()+60000*ready.attempts:0;ready.error=error.message || String(error);this.job.phase=null;
+              this.event(`File work ${ready.status==='failed'?'needs attention':'deferred'}: ${ready.title} — ${ready.error}. Continuing other chats.`);await this.save();
+            }
+          }else if(decision.lane==='chat-scan'){
+            const selected=decision.work;
+            if(selected.error){Object.assign(selected,{error:null,done:false,offset:0,cursor:selected.kind==='project'?'0':null,seenPages:[],uniqueIds:[],emptyChecks:0,reportedTotal:0});this.event(`Repairing only the incomplete discovery route: ${selected.title || selected.key}.`);}
+            await this.discover(selected);
+          }else if(decision.lane==='attachment')await this.processAttachments(attachment);
+          else if(decision.lane==='library')await processLibrary(this,library);
+          else if(decision.lane==='recent')await this.checkRecentChats();
+          else if(decision.lane==='verify'){
+            this.libraryChecked.add(verifyKey(verify));
+            if(!await this.io.libraryVerify(verify)){verify.status=verify.historical?'unavailable':'pending';verify.path=null;verify.retryAt=0;this.event(`Library saved copy needs repair: ${verify.name}.`,'warn','library');await this.save();}
+          }
+          if(decision.lane!=='library')finishWork(this.job,decision.lane,{savedFile:decision.lane==='attachment'&&this.attachmentTurnSaved,urgent:urgentReady===ready&&!!ready,local:!!localReady,now:this.now()});
+          continue;
         }
         const fileLookup=createFileLookup(this.job);
         const libraryWaits=!indexOnly&&this.job.options.library?[...fileReferences(this.job).filter(f=>!f.historical&&!f.external&&!f.parked&&['pending','deferred'].includes(f.status)&&(f.attempts || 0)<2&&!sharedFileBudget(this.job,f,fileLookup).parked&&(f.sourceKind!=='chat'||this.job.options.attachments!==false)).map(f=>f.retryAt),...(this.job.library?.sources || []).filter(s=>s.error&&s.failures<3).map(s=>s.retryAt)]:[];
