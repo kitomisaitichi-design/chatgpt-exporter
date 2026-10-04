@@ -1,4 +1,4 @@
-export const VERSION = '2.4.4';
+export const VERSION = '2.4.5';
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const freshPace = () => ({delay:5000, floor:5000, next:0, until:0, strikes:0, ok:0, recent:[], lastLimit:0, tier:0, tierChangedAt:0, idleRelaxAt:0, stableSince:0, regimes:[]});
 // Tiers are the network cadence. Local disk/cache work never consumes these delays.

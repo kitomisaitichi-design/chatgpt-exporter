@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Exporter — English Autopilot",
-  "version": "2.4.4",
+  "version": "2.4.5",
   "description": "Resumable ChatGPT and small Library file backup, manual large-file catalog, viewer metadata, adaptive checks and searchable activity logs.",
   "minimum_chrome_version": "120",
   "permissions": [

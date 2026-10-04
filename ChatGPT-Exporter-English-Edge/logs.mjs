@@ -34,7 +34,7 @@ export class LogPanel {
   get(id){return this.d.getElementById(id);}
   saveSettings(){try{localStorage.setItem('exporter-log-controls',JSON.stringify(Object.fromEntries([...['log-search','log-level','log-category'].map(id=>[id,this.get(id).value]),['follow',this.follow]])));}catch{}}
   filtered(){return filterEvents(this.snapshot || this.events,{search:this.get('log-search').value,level:this.get('log-level').value,category:this.get('log-category').value,since:this.since});}
-  update(events){this.events=events || [];this.render();}
+  update(events){const list=events || [],last=list.at(-1),stamp=JSON.stringify([list.length,list[0]?.at,last?.at,last?.lastAt,last?.repeated,last?.message]);if(list===this.events&&stamp===this.eventStamp)return;this.events=list;this.eventStamp=stamp;this.render();}
   feedback(text){this.get('log-summary').textContent=text;}
   render(){
     const events=this.filtered(),text=logText(events),signature=JSON.stringify([text,!!this.snapshot]);

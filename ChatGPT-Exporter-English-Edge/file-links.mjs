@@ -5,11 +5,14 @@ const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/i.test(v)?v.toLowerCase():nul
 export function fileIds(file){return [...new Set([file.fileId,file.file_id,file.id,file.libraryId,file.library_file_id].map(id).filter(Boolean))];}
 export function fileLinkState(job){return job.fileLinks ||= {schema:'chatgpt-file-links/v1',sources:{}};}
 export function fileReferences(job){return [...Object.values(job?.library?.entries || {}),...Object.values(job?.entries || {}).flatMap(e=>e.attachments || []),...Object.values(job?.fileLinks?.sources || {})];}
-export function relatedFiles(job,file){
-  const ids=new Set(fileIds(file)),pool=fileReferences(job),found=new Set([file]);
-  if(!ids.size)return [file];
-  // Library IDs can bridge two representations of the same native file ID.
-  let changed=true;while(changed){changed=false;for(const f of pool)if(!found.has(f)&&fileIds(f).some(x=>ids.has(x))){found.add(f);for(const x of fileIds(f))ids.add(x);changed=true;}}
+export function createFileLookup(job){
+  const references=fileReferences(job),byId=new Map();
+  for(const file of references)for(const key of fileIds(file)){let bucket=byId.get(key);if(!bucket)byId.set(key,bucket=[]);bucket.push(file);}
+  return {references,byId};
+}
+export function relatedFiles(job,file,lookup=createFileLookup(job)){
+  const found=new Set([file]),seen=new Set(),pending=fileIds(file);
+  for(let i=0;i<pending.length;i++){const key=pending[i];if(seen.has(key))continue;seen.add(key);for(const peer of lookup.byId.get(key) || [])if(!found.has(peer)){found.add(peer);pending.push(...fileIds(peer));}}
   return [...found];
 }
 export function compatibleFile(target,candidate){
@@ -75,7 +78,7 @@ export function sharedFileCandidates(job,file,conversationId=null){
   for(const fid of primary){const encoded=encodeURIComponent(fid);routes.push(`/backend-api/files/download/${encoded}`);for(const cid of cids.slice(0,2)){const query=new URLSearchParams({conversation_id:cid,inline:'false'});const gizmo=file.gizmoId || related.find(f=>f.gizmoId)?.gizmoId;if(gizmo)query.set('gizmo_id',gizmo);routes.push(`/backend-api/files/download/${encoded}?${query}`,`/backend-api/conversation/${encodeURIComponent(cid)}/attachment/${encoded}/download`);}routes.push(`/backend-api/files/${encoded}/download`);}
   return [...new Set(routes)];
 }
-export function sharedFileBudget(job,file){const peers=relatedFiles(job,file).filter(f=>!f.historical&&(f===file || compatibleFile(file,f))&&(f.retriedAt || 0)>=(file.retriedAt || 0));return {attempts:Math.max(0,...peers.map(f=>f.attempts || 0)),parked:peers.some(f=>f.parked || f.attempts>=2)};}
+export function sharedFileBudget(job,file,lookup){const peers=relatedFiles(job,file,lookup).filter(f=>!f.historical&&(f===file || compatibleFile(file,f))&&(f.retriedAt || 0)>=(file.retriedAt || 0));let attempts=0,parked=false;for(const peer of peers){attempts=Math.max(attempts,peer.attempts || 0);parked ||= !!peer.parked || peer.attempts>=2;}return {attempts,parked};}
 export function retryLinkedFile(job,file,now=Date.now()){
   if(!file)return false;let changed=false;
   const peers=relatedFiles(job,file).filter(f=>!f.historical&&(f===file || compatibleFile({...file,refresh:false},{...f,refresh:false})));
@@ -84,12 +87,14 @@ export function retryLinkedFile(job,file,now=Date.now()){
   return changed;
 }
 export function retainedFileRows(job){
-  const library=Object.values(job.library?.entries || {}),rows=library.map(f=>({...f,sourceRefs:[]}));
+  const library=Object.values(job.library?.entries || {}),rows=library.map(f=>({...f,sourceRefs:[]})),byId=new Map();
+  const add=row=>{for(const id of fileIds(row)){let bucket=byId.get(id);if(!bucket)byId.set(id,bucket=[]);bucket.push(row);}};
+  for(const row of rows)add(row);
   for(const source of Object.values(job.fileLinks?.sources || {})){
-    const ids=fileIds(source),row=!source.historical&&rows.find(f=>!f.historical&&fileIds(f).some(x=>ids.includes(x))&&compatibleFile(f,source));
+    let row=null;if(!source.historical)for(const id of fileIds(source)){row=(byId.get(id) || []).find(f=>!f.historical&&compatibleFile(f,source));if(row)break;}
     const ref={kind:source.sourceKind,name:source.name,conversationId:source.sourceConversationId || null,presence:source.presence,seenAt:source.seenAt,sourceKey:source.sourceKey};
     if(row){row.sourceRefs.push(ref);row.conversationIds=[...new Set([...(row.conversationIds || []),...(source.conversationIds || [])])];}
-    else rows.push({...source,id:source.historical?source.sourceKey:source.id,retainedSource:true,sourceRefs:[ref],conversationIds:source.conversationIds || []});
+    else {row={...source,id:source.historical?source.sourceKey:source.id,retainedSource:true,sourceRefs:[ref],conversationIds:source.conversationIds || []};rows.push(row);if(!source.historical)add(row);}
   }
   return rows;
 }

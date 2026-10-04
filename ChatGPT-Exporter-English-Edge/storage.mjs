@@ -11,6 +11,7 @@ export async function get(store, key) {
   return new Promise((resolve, reject) => {const tx = db.transaction(store);const req = tx.objectStore(store).get(key);req.onsuccess = () => resolve(req.result);req.onerror = () => reject(req.error);});
 }
 export async function put(store, key, value) {
+  if(store==='jobs'&&value)value.uiRevision=(value.uiRevision || 0)+1;
   const db = await ready;
   return new Promise((resolve, reject) => {const tx = db.transaction(store, 'readwrite');tx.objectStore(store).put(value, key);tx.oncomplete = () => resolve();tx.onabort = tx.onerror = () => reject(tx.error || new Error('Local save failed'));});
 }

@@ -1,4 +1,4 @@
-import {seedFileSources,observeFileSource,finishLibraryPresence,rememberFileResult,retainedFileRows,sharedFileBudget} from './file-links.mjs';
+import {seedFileSources,observeFileSource,finishLibraryPresence,rememberFileResult,retainedFileRows,sharedFileBudget,createFileLookup} from './file-links.mjs';
 import {safeName,validId,epoch} from './core.mjs';
 import {validHash,analyzeFiles,applyImagePreference} from './file-intelligence.mjs';
 
@@ -61,8 +61,9 @@ export function libraryWork(job,now=Date.now()) {
   const source=s.sources.find(x=>!x.done&&!x.error || x.error&&x.failures<3&&(x.retryAt || 0)<=now);
   if(source)return {source};
   const candidates=[...Object.values(s.entries),...(job.options?.attachments!==false?Object.values(job.fileLinks.sources).filter(x=>x.sourceKind==='chat'&&!x.historical):[])];
-  const file=candidates.filter(x=>!x.external&&!x.parked&&(x.attempts || 0)<LIBRARY_FAILURE_LIMIT&&['pending','deferred'].includes(x.status)&&(x.retryAt || 0)<=now&&!sharedFileBudget(job,x).parked).sort((a,b)=>(a.size??LIBRARY_LIMIT)-(b.size??LIBRARY_LIMIT) || a.id.localeCompare(b.id))[0];
-  return file?{file}:null;
+  const file=candidates.filter(x=>!x.external&&!x.parked&&(x.attempts || 0)<LIBRARY_FAILURE_LIMIT&&['pending','deferred'].includes(x.status)&&(x.retryAt || 0)<=now).sort((a,b)=>(a.size??LIBRARY_LIMIT)-(b.size??LIBRARY_LIMIT) || a.id.localeCompare(b.id));
+  const lookup=createFileLookup(job),next=file.find(x=>!sharedFileBudget(job,x,lookup).parked);
+  return next?{file:next}:null;
 }
 export function libraryPath(file){return `attachments/library/${safeName(file.id,180)}/${safeName(file.name,160)}`;}
 export function libraryCandidates(file) {

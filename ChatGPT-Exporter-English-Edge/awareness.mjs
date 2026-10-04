@@ -1,6 +1,7 @@
 // Observable pacing policy. Network pacing is handled primarily by the tiered
 // delay in core.mjs. This module only adds short rests for visible app activity
 // and never throttles local disk/cache processing.
+import {USER_QUIET_MS} from './live-settings.mjs';
 export function awareness(job) {
   return job.awareness ||= {actions:[],native:[],seen:{},lastNavigation:0,lastSignal:0,lastUserInteraction:0,probe:false,probeRest:0,recoveries:[],state:'observing',reason:'Observing the app before adding network work.',confidence:0,pressure:0,quietSince:0,lastObservedAt:0};
 }
@@ -44,7 +45,7 @@ export function decide(job,snapshots=[],kind='read',now=Date.now(),waitingSince=
   wait(job.pace.next,'spacing',`Adaptive network spacing · tier ${job.pace.tier || 0}.`);
   wait(a.probeRest,'observing','The single check finished. Briefly observing before another network request.');
   const tier=job.pace.tier || 0;
-  if(job.options?.yieldUser!==false && (a.lastUserInteraction || 0)>0)wait((a.lastUserInteraction || 0)+6*60*1000,'user-active','You are using ChatGPT. Export network work stays quiet until 6 minutes after your last click, keypress, wheel/scroll input, or touch.');
+  if(job.options?.yieldUser!==false && (a.lastUserInteraction || 0)>0)wait((a.lastUserInteraction || 0)+USER_QUIET_MS,'user-active','You are using ChatGPT. Export network work stays quiet until 6 minutes after your last click, keypress, wheel/scroll input, or touch.');
   for(const s of snapshots){
     if(s.blocked)return {state:'needs-attention',reason:s.blocked,until:0,attention:true};
     if(s.worker && (s.frozen || s.discarded))return {state:'needs-attention',reason:'The ChatGPT tab is asleep. Open it once, then resume; the exporter will not repeatedly reload it.',attention:true,until:0};

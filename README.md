@@ -1,12 +1,12 @@
 # ChatGPT Exporter — English Autopilot for Microsoft Edge
 
-**Version 2.4.4 · October 3, 2026**
+**Version 2.4.5 · October 3, 2026**
 
 Build a local backup of the conversations available to your signed-in ChatGPT web session. The extension discovers active, archived and project chats, writes conversation JSON and readable Markdown, tracks revisions, and backs up eligible attachments. Your backup stays in the folder you select.
 
-[Download v2.4.4](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.4) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
+[Download v2.4.5](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.5) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-**Viewer compatibility:** Exporter **2.4.4 remains interoperable with [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)**, including the new shared-content file layout. The current release is **1.1.6**; the download link follows the latest release. Select the complete backup root in the Viewer and open **Files & Library**.
+**Viewer compatibility:** Exporter **2.4.5 remains interoperable with [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)**, including the new shared-content file layout. The current release is **1.1.6**; the download link follows the latest release. Select the complete backup root in the Viewer and open **Files & Library**.
 
 ## Functionality at a glance
 
@@ -21,7 +21,7 @@ Build a local backup of the conversations available to your signed-in ChatGPT we
 | Independent source history | Separate chat/Library presence, retained chat-only files, unavailable-chat records, missing Library items after complete scans, earlier verified versions, source names/links, and source filters. Missing references never remove saved copies. |
 | Download memory | Two failed file transfers shared by linked references, persistent parking, per-file or grouped explicit Retry, and no failure charge for server cooldowns or Stop. |
 | Viewer integration | Current Offline Chat Viewer 1.1.6; versioned relative-path catalogs, shared files and retained history, source-chat navigation, chat Files/text previews, and manual downloaded-copy import. Latest Viewer download link stays current. |
-| Controls and activity | Connect/folder readiness, Start/Stop, Hold/Resume, responsive dashboard, file status cards, list/grid, search/sort/page sizes, full pagination, detailed routes, and log search/level/category/pause/follow/reset/copy/TXT/JSON controls. |
+| Controls and activity | Connect/folder readiness, Start/Stop, Hold/Resume, cached dashboard rendering, live six-minute activity toggle/countdown, file status cards, list/grid, search/sort/page sizes, full pagination, detailed routes, and log search/level/category/pause/follow/reset/copy/TXT/JSON controls. |
 | Recovery and portability | Same-folder queue/cache upgrades, account/workspace checks, disk-index reconciliation, portable-state import/export, cached transcript ZIP, adaptive pacing, offline waits, incomplete discovery repair and optional one-shot difficult-chat recovery. |
 | Local storage | Selected backup root, optional permitted existing-file folder, JSON/Markdown/binaries/catalogs/reports/portable checkpoints; no developer API key or external export service required. |
 
@@ -57,11 +57,19 @@ Use [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewe
 
 v2.4.4 follows the native Library `cursor`, keeps scanning after unsupported entries, catalogs mounted folders without aborting owned-file discovery, and preserves `origination_thread_id` as a source-chat link. File downloads try the observed native no-query route first and retain the frontend headers observed in the signed-in tab. Each file has **two failed transfer attempts**, then stays parked across scans, metadata changes, restarts and portable-state restores until you explicitly retry it.
 
-The Library now has a full-width workspace, four status cards, list/grid views, search, sorting, page sizes of 25/50/100/All, visible first/previous/next/last controls, route details and per-file retry. The dashboard uses a refreshed indigo/slate design with responsive layouts.
+The Library now has a full-width workspace, four status cards, list/grid views, search, sorting, page sizes of 25/50/100/All, visible first/previous/next/last controls, route details and per-file retry. The dashboard uses a refreshed indigo/slate design with responsive layouts. All lists with more than 500 items use 500 rows per page to keep controls responsive; every item remains reachable through search and pagination. Search updates after 120 ms of typing quiet.
 
 Keep the exporter dashboard and signed-in ChatGPT tab open for passive checks. Quiet recent-chat polling gradually backs off; new activity resets it. Full discovery and Library scans retain their fixed deadlines. Offline periods and cooldowns preserve the queue.
 
-Validation: **107 exporter regression tests**. Isolated Edge integration uses native-shaped responses and hundreds of files to check pagination, folder discovery, download bytes, failure memory, per-file retry and responsive file browsing. Live ChatGPT inspection verified the current Library response shapes and a successful native download-link request. Running the updated extension end to end in the live account remains unverified because browser tooling blocks extension pages.
+Validation: **115 exporter regression tests**. Isolated Edge integration uses native-shaped responses and hundreds of files to check pagination, folder discovery, download bytes, failure memory, per-file retry and responsive file browsing. Live ChatGPT inspection verified the current Library response shapes and a successful native download-link request. Running the updated extension end to end in the live account remains unverified because browser tooling blocks extension pages.
+
+## What changed in v2.4.5
+
+Large backups now use indexed file joins and shared failure lookups, cached file/statistics models, reused duplicate/version analysis, coalesced progress rendering and unchanged-log skips. The dashboard avoids regenerating the export catalog on each timer tick. Unchanged rows keep their DOM and expanded Details; changed rows preserve expanded Details by file identity. Large All lists use 500 rows per page.
+
+**Pause network work while I use ChatGPT** now loads its actual saved value and works during a run. Its status shows On/Off and remaining quiet time. Switching it off wakes the activity wait within the worker's one-second tick; other network conditions still apply. The setting saves without an image scan or a full backup-report rewrite. In-flight transfers finish their current operation; the policy governs new reads.
+
+Isolated Edge checks used **10,000 files, 5,000 chats and 1,500 log events**. Queue selection took about 74 ms, 120 unchanged file/log updates about 0.3 ms, and activity-toggle feedback about 132 ms on the test machine. Actual performance depends on the backup and computer. The active-run toggle, persistence, downloads and current Viewer 1.1.6 integration passed; live-account behavior remains unverified. Details: `CHANGELOG-v2.4.5.md`.
 
 ## What changed in v2.4.4
 
@@ -76,7 +84,7 @@ Upgrade in the **same folder** to retain the queue and cache. Existing source re
 
 ## Install in Edge
 
-1. Download **ChatGPT-Exporter-English-Edge-v2.4.4.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
+1. Download **ChatGPT-Exporter-English-Edge-v2.4.5.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
 2. Extract the ZIP to a permanent folder. Inside it, find `ChatGPT-Exporter-English-Edge`, which contains `manifest.json`.
 3. Open `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
 4. Open the exporter dashboard from the extension. Connect to the intended signed-in ChatGPT account and workspace.
@@ -105,7 +113,7 @@ Keep **Edge, the exporter dashboard and its connected signed-in ChatGPT tab open
 | Observed ChatGPT tabs | While connected | New links, changed loaded bodies and completed native replies |
 | Dashboard alarm | 1 minute | Nudges the open dashboard; it does not independently export chats |
 
-Recent checks are bounded checks. The full traversal provides broader discovery coverage. The five-minute setting is a target interval: active streaming, enabled user-yield behavior, browser sleep and actual server cooldowns can delay network requests. User-yield waits for six quiet minutes before new network work. Fresh conversation bodies already captured from ChatGPT can be saved locally during a cooldown.
+Recent checks are bounded checks. The full traversal provides broader discovery coverage. The five-minute setting is a target interval: active streaming, enabled user-yield behavior, browser sleep and actual server cooldowns can delay network requests. When **Pause network work while I use ChatGPT** is On, user-yield waits for six quiet minutes before new network work. Its checkbox remains available during a run, displays the remaining quiet time, and persists across reloads. Switching it Off releases the activity wait; genuine server cooldowns and streaming still delay new requests. Fresh conversation bodies already captured from ChatGPT can be saved locally during a cooldown.
 
 Use the watcher health text to distinguish an active watcher from one waiting on network permission, user activity or rate limits. **Stop passive watch** suspends automatic wakeups; **Start / resume** reactivates them. **Scan now** requests a new discovery pass. Reopening an active saved watcher reconnects while preserving its queue and cooldown.
 
@@ -159,7 +167,7 @@ New binaries use `attachments/content/<sha256>/<first-name>`, so different conte
 
 Point your **kitomisaitichi-design/chatgpt-viewer** at the complete backup folder, keeping `conversation-index.json`, `json/`, `markdown/` and `attachments/` together. Existing native conversation JSON, branches, IDs, timestamps, classifications and basenames keep their format. The conversation index attaches Library files where a source conversation ID is available. Unlinked Library files stay in the file catalog; they are not invented conversations.
 
-Exporter 2.4.4 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. Hash-alias, version-evidence, image-preference, native-file-ID and independent source-reference fields are additive. Historical versions have separate catalog identities so Viewer retains distinct bytes. Viewer 1.1.6 retains the file catalog reader and uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<first-name>` shared copies.
+Exporter 2.4.5 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. Hash-alias, version-evidence, image-preference, native-file-ID and independent source-reference fields are additive. Historical versions have separate catalog identities so Viewer retains distinct bytes. Viewer 1.1.6 retains the file catalog reader and uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<first-name>` shared copies.
 
 | Exporter feature | Viewer behavior |
 | --- | --- |
@@ -185,9 +193,9 @@ Discovery depends on the conversations exposed by the enabled ChatGPT website ro
 
 ## Validation
 
-Isolated Edge checks cover 253-file browsing, linked chat/Library identity reuse, fallback routes, shared failure memory, source disappearance, retained files in Viewer 1.1.6, manual imports, renamed aliases, a reported-hash transfer skip, safe cleanup, image-toggle persistence and resume, and desktop/tablet/phone layouts. The updated version has not been run against the live user account.
+Isolated Edge checks cover 10,000-file/5,000-chat responsiveness, active-run activity-toggle behavior and reload persistence, bounded All browsing, preserved expanded Details, 253-file browsing, linked chat/Library identity reuse, fallback routes, shared failure memory, source disappearance, retained files in Viewer 1.1.6, manual imports, renamed aliases, a reported-hash transfer skip, safe cleanup, image-toggle persistence and resume, and desktop/tablet/phone layouts. The updated version has not been run against the live user account.
 
-All **107 exporter regression tests** pass, including duplicate equality, native identity reuse, failure sharing, explicit retry after metadata changes, false-positive prevention, source retention, stale observations, previous versions, catalog write failure, Stop/removal-journal recovery, version ambiguity, image extraction and image-body cancellation. Runtime syntax and package checks cover the shipped files. The native API shapes were inspected in a signed-in ChatGPT Library session; download and UI integration tests use an isolated Edge profile and synthetic files. No private account data or credentials are included in tests or releases.
+All **115 exporter regression tests** pass, including duplicate equality, native identity reuse, failure sharing, explicit retry after metadata changes, false-positive prevention, source retention, stale observations, previous versions, catalog write failure, Stop/removal-journal recovery, version ambiguity, image extraction and image-body cancellation. Runtime syntax and package checks cover the shipped files. The native API shapes were inspected in a signed-in ChatGPT Library session; download and UI integration tests use an isolated Edge profile and synthetic files. No private account data or credentials are included in tests or releases.
 
 ## Complete version history
 
@@ -195,6 +203,7 @@ This lists **every published GitHub release** plus the earlier development build
 
 | Version | Changes introduced | Release and detailed history |
 | --- | --- | --- |
+| **2.4.5** | Indexed file/queue lookups, cached display models, reused file analysis, coalesced renders, unchanged-log skips, debounced search, bounded All pages, expanded Details retention, and a persisted live six-minute toggle with countdown and worker wakeup. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.5) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.5.md) |
 | **2.4.4** | Native identity reuse across chat/Library before transfer; independent source presence and retained chat-only files; previous verified versions; shared failure budget and retry; stale-observation fix; unified strict 10 MB boundary; source filters/details; current Viewer 1.1.6 checks. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.4) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.4.md) |
 | **2.4.3** | SHA-256 sharing across names/IDs; reported-hash request suppression; content-hash storage; safe Deduplicate & smart scan with removal journal; version families and preferred/review evidence; image downloads toggle and chat image-pointer support. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.3) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.3.md) |
 | **2.4.2** | Native Library cursor and source-chat metadata; continued discovery past mounted/unsupported entries; stable in-flight queue objects; persistent two-failure parking; explicit retries; native no-query route/header handling; full-width Library with search, sort, grid/list, page sizes and visible pagination; refreshed responsive visuals. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.2) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.2.md) |
