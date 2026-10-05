@@ -16,12 +16,17 @@ import {workPresentation} from './work-scheduler.mjs';
 import {createRenderScheduler} from './ui-scheduler.mjs';
 import {createDashboardStats} from './dashboard-state.mjs';
 import {setUserYield,userYieldStatus} from './live-settings.mjs';
+import {resolveBackupFolder,scanTranscriptInventory,readDetectedTranscript,mergeFolderMetadata} from './local-detection.mjs';
+import {scanLocalFileCopies,localCopyCandidates,verifyLocalCopy} from './local-files.mjs';
 const $=id=>document.getElementById(id);
 const getDashboardStats=createDashboardStats(),renderer=createRenderScheduler(paint);
 function update(){renderer.request();}
 let job=null,scope=null,folder=null,root=null,attachmentLibrary=null,localAttachmentIndex=null,engine=null,running=false,tabId=null,connected=false,canEdit=true,notice='';
 let sensed={at:0,key:null,snapshots:[]},diskFiles=null,diskIndexEntries=null,passiveBusy=false,initializing=true;
-let connecting=false,logPanel=null,libraryPanel=null;
+let connecting=false,logPanel=null,libraryPanel=null,detecting=false,locations=[],backupInput=null,rootDetection=null,localSummary="Choose a folder to detect existing chats and file copies.";
+let detectionDepth=0;
+function beginDetection(){detectionDepth++;detecting=true;update();}
+function endDetection(){detectionDepth=Math.max(0,detectionDepth-1);detecting=detectionDepth>0;update();}
 const harvested=new Map(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const digest=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(b=>b.toString(16).padStart(2,'0')).join('');
 const hashData=data=>digest(JSON.stringify(data));
@@ -43,18 +48,18 @@ function paint() {
   for (const id of ['connect','folder','attachment-library','repair-attachments','retry','scan','add','archived','projects','assist','verify','attachments','passive','passive-hours','recent-check-minutes','smart-watch','library-enabled','library-scan','library-retry','library-deduplicate','download-images','work-mode','export-state','import-state']) $(id).disabled=running || !canEdit || initializing;
   $('yield-user').disabled=!canEdit || initializing;
   $('yield-status').textContent=userYieldStatus(job || {options:{yieldUser:$('yield-user').checked}});
-  if(initializing)$('start').disabled=true;
+  if(initializing || detecting)$('start').disabled=true;if(detecting)for(const id of ['folder','attachment-library','local-rescan','connect'])$(id).disabled=true;$('local-rescan').disabled=running || detecting || !scope || !canEdit;$('local-scan-status').textContent=localSummary;
   const schedule=job?.schedule || {},stamp=t=>t?new Date(t).toLocaleTimeString():'not yet',recent=Math.max(0,(schedule.nextCheckAt || Date.now())-Date.now());
   const observedAgo=schedule.lastTelemetryAt?Math.floor((Date.now()-schedule.lastTelemetryAt)/1000):null;
   const waiting=Math.max(job?.pace.until || 0,schedule.checkWaitUntil || 0)>Date.now();
   $('watch-details').textContent=job?.schedule?.enabled?`Last tab observation: ${observedAgo===null?'not yet':observedAgo+' s ago'} · ${schedule.observedTabs || 0} tabs · last server check: ${stamp(schedule.lastCheckAt)} · recent check ${recent?'in '+Math.ceil(recent/60000)+' min':'due'}${waiting?' (waiting for the network window)':''}${schedule.checkError?' · '+schedule.checkError:''}. Keep the dashboard and connected ChatGPT tab open; browser alarms wake checks when the dashboard is in the background.`:'Passive watcher is off.';
-  logPanel?.update(job?.events || []);renderLibrary();$('connection').textContent=connected ? 'Connected':'Not connected';$('account').textContent=scope ? `User ${scope.user} · workspace ${scope.account || 'default session'}` : 'One workspace per backup.';$('folder-name').textContent=folder ? `${folder.name} / chatgpt-backup-${scope?.key.slice(0,12) || '…'}`:'No folder selected';$('attachment-library-name').textContent=attachmentLibrary ? `${attachmentLibrary.name} · reported hash required for unrelated file reuse`:'No local file library selected';
+  logPanel?.update(job?.events || []);renderLibrary();$('connection').textContent=connected ? 'Connected':'Not connected';$('account').textContent=scope ? `User ${scope.user} · workspace ${scope.account || 'default session'}` : 'One workspace per backup.';$('folder-name').textContent=rootDetection?.path || (folder?folder.name:'No folder selected');$('attachment-library-name').textContent=attachmentLibrary ? `${attachmentLibrary.name} · ${locations.length} remembered locations · names + native IDs + verified hashes`:'No local file library selected';
   renderDashboard(document,{job,scope,connected,connecting,initializing,folder,running,notice,saved:c.saved,total:c.total,failed:c.failed+c.discovery-(job?.sources?.filter(s=>!s.done && !s.error).length || 0)});
 }
 async function bridge(args,targetId=tabId) {
   if (!targetId) throw new Paused('Connect to ChatGPT first.');
   let timer;let results;
-  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV247) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV247.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
+  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV248) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV248.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
   return results[0]?.result || {ok:false,status:0,kind:'bridge'};
 }
 async function sense(expected) {
@@ -164,9 +169,30 @@ function migrateLoadedJob(j){
 }
 async function connect(expectedKey=null) {
   $('message').textContent='Connecting to your signed-in ChatGPT session…';await ensureTab();const result=await readyBridge(),nextScope={...result.scope,key:await digest(JSON.stringify([result.scope.user,result.scope.account || null]))};
-  if (expectedKey && nextScope.key!==expectedKey) throw new Paused('The account or workspace changed. Automatic resume stopped; reconnect to the original workspace.');scope=nextScope;connected=true;await db.put('meta','lastScope',scope);job=await db.get('jobs',scope.key) || null;if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`) || null;attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;root=null;localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;sensed.at=0;applyJobOptionsToUI();update();if (!job) $('message').textContent='Connected. Choose a folder, then start the automatic export.';
+  if (expectedKey && nextScope.key!==expectedKey) throw new Paused('The account or workspace changed. Automatic resume stopped; reconnect to the original workspace.');scope=nextScope;connected=true;await db.put('meta','lastScope',scope);job=await db.get('jobs',scope.key) || null;if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`) || null;attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;root=null;rootDetection=null;backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;sensed.at=0;applyJobOptionsToUI();update();if (!job) $('message').textContent='Connected. Choose a folder, then start the automatic export.';
 }
-async function folderReady(request=false) {if (!folder) throw new Paused('Choose a backup folder first.');let permission=await folder.queryPermission({mode:'readwrite'});if (permission!=='granted' && request) permission=await folder.requestPermission({mode:'readwrite'});if (permission!=='granted') throw new Paused('Folder permission is needed. Click Choose folder to grant access again.');if (!scope) throw new Paused('Connect to ChatGPT first.');root=await folder.getDirectoryHandle(`chatgpt-backup-${scope.key.slice(0,12)}`,{create:true});}
+async function rememberLocation(handle,role){
+  if(!handle)return;for(const x of locations)if(await x.handle.isSameEntry(handle)){x.role=x.role==='backup'?'backup':role;x.at=Date.now();await db.put('meta',`localLocations:${scope.key}`,locations);return;}
+  locations.unshift({handle,role,name:handle.name,at:Date.now()});locations=locations.slice(0,8);await db.put('meta',`localLocations:${scope.key}`,locations);
+}
+function pickerOptions(role){const options={mode:role==='backup'?'readwrite':'read',id:role==='backup'?'chatgpt-backup':'chatgpt-existing-files'},start=$('local-start-in').value;if(start!=='last')options.startIn=start;return options;}
+async function folderReady(request=false) {
+  if (!folder) throw new Paused('Choose a backup folder first.');if(!scope)throw new Paused('Connect to ChatGPT first.');
+  let permission=await folder.queryPermission({mode:'readwrite'});if(permission!=='granted'&&request)permission=await folder.requestPermission({mode:'readwrite'});if(permission!=='granted')throw new Paused('Folder permission is needed. Click Choose folder to grant access again.');
+  if(root)return;localSummary='Detecting the selected folder and matching nested backups…';update();
+  const picked=folder,resolved=await resolveBackupFolder(picked,scope.key,{onProgress:s=>{localSummary='Looking for the matching backup · '+s.directories+' folders checked';update();}});
+  root=resolved.root;rootDetection=resolved;folder=root;backupInput=resolved.created?picked:backupInput;await db.put('meta',`folder:${scope.key}`,folder);if(backupInput)await db.put('meta',`backupInput:${scope.key}`,backupInput);await rememberLocation(picked,'backup');await rememberLocation(root,'backup');
+}
+async function detectLocalState({applyOptions=true}={}){
+  if(!scope||!folder)return;beginDetection();notice='';try{
+    await folderReady(false);const hadJob=!!job,portable=rootDetection.metadata.state?.job;job ||= portable?.scope?.key===scope.key?structuredClone(portable):newJob(scope,{});job.scope=scope;mergeFolderMetadata(job,rootDetection.metadata);migrateLoadedJob(job);
+    if(!hadJob){job.status='ready';for(const e of Object.values(job.entries))if(e.status==='saved')e.status='pending';}
+    const inventory=await diskInventory(),cached=await db.cacheInventory(scope.key);await new Engine(job,{save:j=>db.put('jobs',scope.key,j),changed:update}).reconcileInventory([...cached,...inventory]);
+    localSummary='Detected '+diskFiles.size+' local chat bodies · '+inventory.filter(e=>!diskFiles.has(e.id)).length+' index-only links · '+inventory.filter(e=>e.localRewrite).length+' local rewrites queued · '+cached.filter(e=>!diskFiles.has(e.id)).length+' browser-cache bodies · '+locations.length+' remembered locations'+(diskScanStats.tooLarge?' · '+diskScanStats.tooLarge+' JSON files exceed the 64 MB scan limit':'')+(diskScanStats.truncated?' · scan limit reached':'');
+    job.localDetection={at:Date.now(),...diskScanStats,summary:localSummary};job.message=localSummary;appendEvent(job,localSummary,Date.now(),'info','system');await db.put('jobs',scope.key,job);if(applyOptions)applyJobOptionsToUI();
+  }finally{endDetection();}
+}
+
 async function write(path,content) {
   let stream,timedOut=false,timer;
   const task=(async()=>{if(!root)await folderReady();let directory=root;const parts=path.split('/');for(const part of parts.slice(0,-1))directory=await directory.getDirectoryHandle(part,{create:true});const handle=await directory.getFileHandle(parts.at(-1),{create:true});stream=await handle.createWritable();if(timedOut){void stream.abort().catch(()=>{});return;}await stream.write(content);if(timedOut){void stream.abort().catch(()=>{});return;}await stream.close();})();
@@ -178,27 +204,22 @@ function reportData(j) {
 function indexData(j) { const fileMap=libraryFileMap(j);
   return {schema:'chatgpt-conversation-index/v1',library_index:'attachments/library-index.json',viewer_handoff:'viewer-handoff.json',version:VERSION,generated_at:new Date().toISOString(),scope:j.scope.key,total:Object.keys(j.entries).length,order:'calendar create time (earliest known conversation/message time)',entries:Object.values(j.entries).sort((a,b)=>(epoch(a.create_time)||epoch(a.update_time)||Infinity)-(epoch(b.create_time)||epoch(b.update_time)||Infinity)).map(e=>({id:e.id,url:`https://chatgpt.com/c/${e.id}`,title:e.title,status:e.status,create_time:e.create_time || null,update_time:e.update_time,checked_update_time:e.checkedUpdateTime || null,chat_kind:e.chatKind || (e.projectId?'project-chat':'unknown'),chat_kind_evidence:e.chatKindEvidence || null,project:e.project || null,found_via:e.foundVia || [],saved_at:e.savedAt || null,content_hash:e.contentHash || null,previous_content_hash:e.previousContentHash || null,revision_count:e.revisionCount || 0,changed_at:e.changedAt || null,json:e.basename?`json/${e.basename}.json`:null,markdown:e.basename?`markdown/${e.basename}.md`:null,attachments:conversationFiles(j,e,fileMap),attachment_state_revision:e.attachmentStateRevision || 0,attachment_scanned_at:e.attachmentScannedAt || null,attachment_pending:!!e.attachmentPending,attachment_retry_at:e.attachmentRetryAt || 0,error:e.error || null,last_failure_at:e.lastFailureAt || null,last_failure_status:e.lastFailureStatus || null,broken_until:e.brokenUntil || 0}))};
 }
+let diskScanStats={};
 async function diskInventory() {
-  if(diskFiles && diskIndexEntries)return [...diskIndexEntries.values()];diskFiles=new Map();diskIndexEntries=new Map();if(!root)return [];
-  const metadata=new Map();
-  try {
-    const handle=await root.getFileHandle('conversation-index.json'),saved=JSON.parse(await(await handle.getFile()).text());
-    if(saved.scope===scope.key)for(const e of saved.entries || [])if(validId(e.id)){
-      metadata.set(e.id,e);
-      diskIndexEntries.set(e.id,{id:e.id,title:e.title,update_time:e.update_time,checkedUpdateTime:e.checked_update_time,create_time:e.create_time,contentHash:e.content_hash || null,previousContentHash:e.previous_content_hash || null,revisionCount:e.revision_count || 0,changedAt:e.changed_at || null,savedAt:e.saved_at || null,chatKind:e.chat_kind || null,chatKindEvidence:e.chat_kind_evidence || null,project:e.project || null,foundVia:e.found_via || [],basename:e.json?.startsWith('json/')?e.json.slice(5,-5):null,indexStatus:e.status || 'pending',attachments:e.attachments || [],attachmentStateRevision:e.attachment_state_revision || 0,attachmentScannedAt:e.attachment_scanned_at || null,attachmentPending:!!e.attachment_pending,attachmentRetryAt:e.attachment_retry_at || 0,origin:'existing conversation index'});
-    }
-  } catch(e){if(e.name!=='NotFoundError' && !(e instanceof SyntaxError))throw e;}
-  let directory;try {directory=await root.getDirectoryHandle('json');} catch(e){if(e.name==='NotFoundError')return [...diskIndexEntries.values()];throw e;}
-  const byName=new Map([...metadata.values()].filter(e=>e.json?.startsWith('json/')).map(e=>[e.json.slice(5),e]));
-  for await(const [name,handle] of directory.entries()) {
-    if(handle.kind!=='file' || !name.endsWith('.json'))continue;
-    const saved=byName.get(name),id=saved?.id || name.match(/_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json$/i)?.[1];if(!validId(id))continue;
-    const basename=name.slice(0,-5),entry={id,title:saved?.title || name.slice(0,-id.length-6),update_time:saved?.update_time,checkedUpdateTime:saved?.checked_update_time,create_time:saved?.create_time,contentHash:saved?.content_hash || null,previousContentHash:saved?.previous_content_hash || null,revisionCount:saved?.revision_count || 0,changedAt:saved?.changed_at || null,savedAt:saved?.saved_at || null,chatKind:saved?.chat_kind || null,chatKindEvidence:saved?.chat_kind_evidence || null,project:saved?.project || null,foundVia:saved?.found_via || [],basename,diskBacked:true,inventoryStatus:'saved',attachments:saved?.attachments || [],attachmentStateRevision:saved?.attachment_state_revision || 0,attachmentScannedAt:saved?.attachment_scanned_at || null,attachmentPending:!!saved?.attachment_pending,attachmentRetryAt:saved?.attachment_retry_at || 0,origin:'existing backup file'};
-    diskFiles.set(id,{handle,basename,entry});diskIndexEntries.set(id,{...(diskIndexEntries.get(id)||{}),...entry});
+  if(diskFiles&&diskIndexEntries)return [...diskIndexEntries.values()];diskFiles=new Map();diskIndexEntries=new Map();if(!root)return [];
+  const sources=[root],extra=[backupInput,...locations.filter(x=>x.role==='backup').map(x=>x.handle)];
+  for(const h of extra)if(h&&await h.queryPermission({mode:'read'})==='granted'&&!(await Promise.all(sources.map(x=>x.isSameEntry(h)))).some(Boolean))sources.push(h);
+  diskScanStats={files:0,valid:0,invalid:0,tooLarge:0,truncated:false,errors:0};
+  for(const source of sources){
+    const scan=await scanTranscriptInventory(source,scope.key,{hashData,onProgress:s=>{localSummary='Scanning local chat JSON · '+(diskScanStats.files+s.files)+' files · '+s.directories+' folders';update();}});
+    diskScanStats.files+=scan.stats.files;diskScanStats.invalid+=scan.stats.invalid;diskScanStats.tooLarge+=scan.stats.tooLarge;diskScanStats.truncated ||= scan.stats.truncated;diskScanStats.errors+=scan.stats.errors;
+    for(const [id,e] of scan.entries)if(!diskIndexEntries.has(id))diskIndexEntries.set(id,e);
+    for(const [id,f] of scan.files){const previous=diskFiles.get(id);if(previous&&previous.score>=f.score)continue;if(source!==root)Object.assign(f.entry,{diskBacked:false,cacheBacked:true,localRewrite:true,validated:false});diskFiles.set(id,f);diskIndexEntries.set(id,f.entry);}
   }
-  return [...diskIndexEntries.values()];
+  diskScanStats.valid=diskFiles.size;return [...diskIndexEntries.values()];
 }
-async function diskRead(id) {await diskInventory();const found=diskFiles.get(id);if(!found)return null;try {const file=await found.handle.getFile(),data=JSON.parse(await file.text());if(!conversationValid(data,id))return null;return {data,at:file.lastModified,basename:found.basename,hash:found.entry.contentHash || await hashData(data),passive:false};} catch(e){if(e.name==='NotFoundError' || e instanceof SyntaxError)return null;throw e;}}
+async function diskRead(id) {await diskInventory();const found=diskFiles.get(id);if(!found)return null;try{const result=await readDetectedTranscript(found);return result?{...result,hash:await hashData(result.data),passive:false}:null;}catch(e){if(['NotFoundError','TypeMismatchError'].includes(e.name)||e instanceof SyntaxError)return null;throw e;}}
+
 async function index(j) {const data=indexData(j);await write('conversation-index.json',JSON.stringify(data,null,2));await write('viewer-handoff.json',JSON.stringify(viewerHandoff(j,data),null,2));}
 const catalogWriter=new CatalogWriter(write);
 async function libraryReport(j){await catalogWriter.report(j,root,!running || ['complete','incomplete','indexed','paused','watching'].includes(j.status));}
@@ -208,22 +229,19 @@ async function report(j) {await libraryReport(j);await write('export-report.json
 async function recover(id,expected,isStopped) {const context=await bridge({op:'context'});if (!context.ok || JSON.stringify([context.scope?.user,context.scope?.account])!==JSON.stringify([expected.user,expected.account])) throw new Paused('Account changed before browser recovery. Reconnect to the original account.');const since=Date.now();await chrome.tabs.update(tabId,{url:`https://chatgpt.com/c/${encodeURIComponent(id)}`,active:false});sensed.at=0;for (let i=0;i<40;i++) {if (isStopped()) throw new Paused('Paused by you.');await sleep(1000);let result;try {result=await bridge({op:'peek',id,since,scope:expected});} catch {continue;}if ([401,403,409].includes(result.status)) throw new Paused(result.error || 'Sign in or finish the browser check in the ChatGPT tab.');if (result.status===200 && result.data) {sensed.at=0;return {data:result.data};}if (result.limit && result.limit.at>=since) {sensed.at=0;return {limit:result.limit};}}return null;}
 function addIds() {const text=$('ids').value.trim();if (!text) return;const ids=text.split(/[\s,]+/).filter(Boolean).map(value=> {if (/^https?:/i.test(value)) {try {const u=new URL(value);return ['chatgpt.com','chat.openai.com'].includes(u.hostname) ? u.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/)?.[1] : null;} catch {return null;}}return value;});if (ids.some(id=>!validId(id))) throw new Error('One or more links / IDs are invalid. Use full ChatGPT conversation links or conversation IDs.');for (const id of ids) mergeEntry(job,{id,title:'Added conversation'});$('ids').value='';}
 function decode64(value){const s=atob(value),out=new Uint8Array(s.length);for(let i=0;i<s.length;i++)out[i]=s.charCodeAt(i);return out;}
-function localKey(name){return String(name || '').normalize('NFC').trim().toLocaleLowerCase();}
 async function attachmentLibraryReady(request=false){
   if(!attachmentLibrary)return false;let permission=await attachmentLibrary.queryPermission({mode:'read'});if(permission!=='granted' && request)permission=await attachmentLibrary.requestPermission({mode:'read'});return permission==='granted';
 }
 async function buildLocalAttachmentIndex(){
-  if(localAttachmentIndex)return localAttachmentIndex;const index=new Map();let scanned=0,truncated=false;
-  const add=async(handle,path,source)=>{if(scanned>=50000){truncated=true;return;}let file;try{file=await handle.getFile();}catch{return;}scanned++;if(file.size>ATTACHMENT_MAX_BYTES)return;if(file.size<=8192 && attachmentError(await file.text()))return;const key=localKey(file.name);if(!key)return;const list=index.get(key)||[];list.push({handle,path,source,size:file.size,lastModified:file.lastModified});index.set(key,list);};
-  const walk=async(dir,prefix,source,depth=0)=>{if(depth>8 || scanned>=50000){truncated=true;return;}for await(const [name,handle] of dir.entries()){if(scanned>=50000){truncated=true;break;}if(handle.kind==='directory'){if(source==='backup' && depth===0 && ['json','markdown','attachment-errors'].includes(name))continue;await walk(handle,`${prefix}${name}/`,source,depth+1);}else await add(handle,`${prefix}${name}`,source);}};
-  if(root)await walk(root,'','backup');
-  if(await attachmentLibraryReady(false))await walk(attachmentLibrary,'','library');
-  localAttachmentIndex={index,scanned,truncated,at:Date.now()};return localAttachmentIndex;
+  if(localAttachmentIndex)return localAttachmentIndex;const sources=[];
+  if(root)sources.push({handle:root,source:'backup'});if(await attachmentLibraryReady(false))sources.push({handle:attachmentLibrary,source:'library'});
+  for(const x of locations)if(await x.handle.queryPermission({mode:'read'})==='granted')sources.push({handle:x.handle,source:'remembered:'+x.name});
+  const priorIndex=await db.get('meta',`localFileIndex:${scope.key}`);localAttachmentIndex=await scanLocalFileCopies(sources,scope.key,{priorIndex,onProgress:s=>{localSummary='Indexing local files · '+s.scanned+' checked · '+s.eligible+' under 10 MB · '+s.large+' manual-size files';update();}});await db.put('meta',`localFileIndex:${scope.key}`,localAttachmentIndex);
+  localSummary='Local file index: '+localAttachmentIndex.scanned+' files checked · '+localAttachmentIndex.eligible+' eligible copies · '+localAttachmentIndex.large+' at/above 10 MB · '+localAttachmentIndex.invalid+' empty/error files'+(localAttachmentIndex.truncated?' · scan limit reached':'');update();return localAttachmentIndex;
 }
 async function reuseLocalAttachment(asset,basename){
-  const expected=validHash(asset.remoteSha256);if(!expected || !asset?.name || job.options.downloadImages===false && isImage(asset))return null;
-  const inventory=await buildLocalAttachmentIndex(),candidates=(inventory.index.get(localKey(asset.name)) || []).filter(x=>asset.size!=null&&x.size===Number(asset.size));
-  for(const candidate of candidates){const file=await candidate.handle.getFile();if(await byteHash(file)!==expected)continue;const saved=await contentStore.find(expected,{size:file.size}) || await contentStore.save(file,asset,{source:'local-copy'});return {name:asset.name,id:asset.id,...saved,mime:file.type || asset.mime || null};}
+  if(asset.refresh&&!validHash(asset.remoteSha256)||job.options.downloadImages===false&&isImage(asset))return null;const inventory=await buildLocalAttachmentIndex();
+  let checked=0;for(const candidate of localCopyCandidates(inventory,asset)){await engine?.holdPoint?.();if(++checked%25===0){localSummary='Checking local hashes for '+(asset.name || 'file')+' · '+checked+' candidate copies';update();await sleep(0);}const file=await verifyLocalCopy(candidate,asset,inventory,byteHash);if(!file)continue;const saved=await contentStore.save(file,asset,{source:'local-copy',maxBytes:LIBRARY_LIMIT-1});await db.put('meta',`localFileIndex:${scope.key}`,inventory);return {name:asset.name,id:asset.id,...saved,mime:file.type || asset.mime || null};}
   return null;
 }
 
@@ -287,7 +305,7 @@ async function downloadLibraryFile(f,beforeRequest){
   if(!f.refresh){
     try{const disk=await fileAt(f.path || dest);if(disk.size<LIBRARY_LIMIT && (f.size===null || disk.size===f.size) && !attachmentError(await disk.slice(0,8192).text())){const hash=await byteHash(disk);if((!f.sha256 || f.sha256===hash)&&(!f.remoteSha256 || f.remoteSha256===hash))return await contentStore.find(hash,{size:disk.size,maxBytes:LIBRARY_LIMIT-1,exclude:f}) || {status:'saved',source:'existing-local',refresh:false,size:disk.size,path:f.path || dest,sha256:hash};}}catch(e){if(!['NotFoundError','TypeMismatchError'].includes(e.name))throw e;}
     // A local name+size match also requires a reported SHA-256 before reuse.
-    if(f.size!==null && validHash(f.remoteSha256)){const inventory=await buildLocalAttachmentIndex(),candidates=(inventory.index.get(localKey(f.name)) || []).filter(x=>x.size===f.size && x.size<LIBRARY_LIMIT);if(candidates.length===1){const file=await candidates[0].handle.getFile(),hash=await byteHash(file);if(f.remoteSha256===hash)return await contentStore.save(file,f,{source:'local-copy',maxBytes:LIBRARY_LIMIT-1});}}
+    const local=await reuseLocalAttachment(f);if(local)return local;
   }
   if(job.options.downloadImages===false && isImage(f))return {status:'manual',imageExcluded:true,error:null};
   const reused=await contentStore.findFor(f,{maxBytes:LIBRARY_LIMIT-1});if(reused)return reused;
@@ -308,14 +326,14 @@ async function deduplicateFiles(){
 function renderLibrary(){libraryPanel?.update(job,{running,canEdit,initializing});}
 
 async function reconcileLocalAttachments(){
-  if(!job || !root)return {matched:0,checked:0};localAttachmentIndex=null;const inventory=await buildLocalAttachmentIndex();const libraryGranted=await attachmentLibraryReady(false);let matched=0,checked=0;
+  if(!job || !root)return {matched:0,checked:0};localAttachmentIndex=null;const inventory=await buildLocalAttachmentIndex();const libraryGranted=await attachmentLibraryReady(false);let matched=0,checked=0;for(const f of Object.values(job.library?.entries || {}))if(['pending','deferred'].includes(f.status)&&!f.parked){checked++;const local=await reuseLocalAttachment(f);if(local){rememberFileResult(job,f,local);matched++;}}
   for(const entry of Object.values(job.entries || {})){
     if(entry.status!=='saved')continue;const key=`${scope.key}:${entry.id}`;let cached=await db.get('chats',key);if(!cached?.data)cached=await diskRead(entry.id);if(!cached?.data)continue;
     const assets=extractAttachments(cached.data);if(!assets.length)continue;checked+=assets.length;const prior=new Map((entry.attachments || []).map(a=>[String(a.id || a.name),a])),next=[];let unresolvedAuto=false;
     for(const asset of assets){const existing=prior.get(String(asset.id || asset.name));if(existing?.status==='saved' || existing?.status==='unverified'){const validated=await validateSavedAttachment(asset,existing);if(validated){next.push(validated);continue;}existing.status='deferred';existing.autoRetry=true;existing.error='Previously saved attachment is missing or invalid; queued for retrieval.';}const local=await reuseLocalAttachment(asset,entry.basename || entry.id);if(local){next.push(local);matched++;continue;}if(existing){next.push(existing);if(existing.autoRetry!==false && ['deferred','rate-limited'].includes(existing.status))unresolvedAuto=true;}else unresolvedAuto=true;}
     if(next.length)entry.attachments=next;entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;entry.attachmentPending=unresolvedAuto;entry.attachmentRetryAt=0;
   }
-  const source=libraryGranted?'backup + chosen existing-files folder':'backup folder only (no readable existing-files folder selected)';
+  const source=libraryGranted?'backup + chosen and remembered files folders':'backup + remembered permitted folders';localSummary=`Local scan: ${inventory.scanned} files · ${matched} copies reused · ${inventory.large} at/above 10 MB. Unmatched files need a native-ID index with a verified hash, or an expected SHA-256; names and sizes alone do not prove identity.`;
   job.events ||= [];job.events.push({at:Date.now(),message:`Local attachment reconciliation: ${matched} file${matched===1?'':'s'} reused/copied from disk; ${checked-matched} attachment reference${checked-matched===1?'':'s'} not matched locally. Scanned ${inventory.scanned} permitted file${inventory.scanned===1?'':'s'} from ${source}${inventory.truncated?' (scan cap reached)':''}.`});job.events=job.events.slice(-1500);await db.put('jobs',scope.key,job);await report(job);update();return {matched,checked,scanned:inventory.scanned,libraryGranted};
 }
 function resetSourcesForScan(reason='Rescanning lists for new / changed chats…') {job.sources=newJob(scope,{archived:$('archived').checked,projects:$('projects').checked}).sources;job.options.archived=$('archived').checked;job.options.projects=$('projects').checked;job.discoveryAudit={round:0,baseline:Object.keys(job.entries || {}).length,stable:false,lastVerifiedAt:job.discoveryAudit?.verifiedAt || 0};job.discoveryUncertain=false;sensed.at=0;job.status='ready';job.message=reason;job.schedule ||= {};job.schedule.fullScanPending=true;job.schedule.lastScanAttemptAt=Date.now();job.schedule.nextScanAt=Date.now()+(job.schedule.intervalMs || 10800000);}
@@ -330,7 +348,7 @@ async function importPortableObject(obj){
   job=imported;await db.put('jobs',scope.key,job);applyJobOptionsToUI();update();if(root){diskFiles=null;await diskInventory();}await index(job).catch(()=>{});
 }
 async function start(auto=false,observed=false) {
-  if (running) return;if (!connected || !scope) throw new Paused('Connect to ChatGPT first.');await folderReady(!auto);
+  if (running || detecting) return;if (!connected || !scope) throw new Paused('Connect to ChatGPT first.');await folderReady(!auto);if(!diskFiles)await detectLocalState({applyOptions:false});
   const opts={archived:$('archived').checked,projects:$('projects').checked,assist:$('assist').checked,verify:$('verify').checked,attachments:$('attachments').checked,passive:$('passive').checked,passiveHours:Number($('passive-hours').value)||3,yieldUser:$('yield-user').checked,library:$('library-enabled').checked,downloadImages:$('download-images').checked,smartWatch:$('smart-watch').checked,mode:$('work-mode').value};
   if (!job) job=newJob(scope,opts);else Object.assign(job.options,opts);job.schedule ||= newJob(scope,opts).schedule;job.schedule.enabled=opts.passive;job.schedule.intervalMs=opts.passiveHours*3600000;ensureWatchSchedule(job);job.schedule.recentIntervalMs=Number($('recent-check-minutes').value)*60000 || 300000;
   if(!auto)job.schedule.suspended=false;
@@ -368,8 +386,19 @@ async function init() {
   addEventListener('online',()=>{if(job?.schedule){job.schedule.checkError=null;job.schedule.checkWaitUntil=0;}void passiveTick();});
   update();
   bind('connect',async()=>{connecting=true;update();try{await connect();}finally{connecting=false;update();}});
-  bind('folder',async()=>{if (!scope) throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker({mode:'readwrite',id:'chatgpt-backup'}),previous=folder;folder=next;root=null;localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;await db.put('meta',`folder:${scope.key}`,folder);await folderReady();if (job && (!previous || !(await previous.isSameEntry(next)))) {for (const e of Object.values(job.entries)) if(e.status==='saved') {e.status='pending';e.retryAt=0;}for(const f of Object.values(job.library?.entries || {}))if(f.status==='saved'){f.status='pending';f.retryAt=0;}job.status='ready';job.message='Folder changed. Valid JSON files/cache will be reused before any server retrieval.';await db.put('jobs',scope.key,job);}update();});
-  bind('attachment-library',async()=>{if(!scope)throw new Paused('Connect to ChatGPT first.');attachmentLibrary=await showDirectoryPicker({mode:'read',id:'chatgpt-existing-files'});localAttachmentIndex=null;await db.put('meta',`attachmentLibrary:${scope.key}`,attachmentLibrary);await attachmentLibraryReady(true);if(job){if(!root)try{await folderReady(false);}catch{}if(root){job.message='Scanning your chosen local files folder for existing attachment matches…';update();await reconcileLocalAttachments();}else{job.message='Existing files folder saved. Grant the backup-folder permission or press Start; local attachment matching will run before any missing file uses the network.';await db.put('jobs',scope.key,job);update();}}else update();});
+  bind('folder',async()=>{
+    if(!scope)throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker(pickerOptions('backup')),previous=root || folder;
+    beginDetection();try{
+    folder=next;root=null;rootDetection=null;backupInput=null;localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;
+    await folderReady();if(job&&(!previous||!await previous.isSameEntry(root))){for(const e of Object.values(job.entries))if(e.status==='saved'){e.status='pending';e.retryAt=0;}for(const f of fileReferences(job))if(f.status==='saved'){f.status='pending';f.retryAt=0;}job.status='ready';}
+    await detectLocalState();await buildLocalAttachmentIndex();update();
+    }finally{endDetection();}
+  });
+  bind('attachment-library',async()=>{
+    if(!scope)throw new Paused('Connect to ChatGPT first.');attachmentLibrary=await showDirectoryPicker(pickerOptions('library'));localAttachmentIndex=null;await db.put('meta',`attachmentLibrary:${scope.key}`,attachmentLibrary);await rememberLocation(attachmentLibrary,'library');
+    beginDetection();try{await buildLocalAttachmentIndex();if(folder){await folderReady(false);diskFiles=null;diskIndexEntries=null;await detectLocalState();await reconcileLocalAttachments();}}finally{endDetection();}
+  });
+  bind('local-rescan',async()=>{beginDetection();try{diskFiles=null;diskIndexEntries=null;localAttachmentIndex=null;if(folder)await detectLocalState();await buildLocalAttachmentIndex();if(job&&root)await reconcileLocalAttachments();}finally{endDetection();}});
   bind('repair-attachments',async()=>{
     if(!job || !connected)throw new Paused('Connect to ChatGPT first.');await folderReady(true);
     let queued=0;for(const e of Object.values(job.entries || {}))if(repairAttachmentEntry(e,true))queued++;
@@ -387,7 +416,7 @@ async function init() {
   bind('zip',async()=>{if (!job) throw new Error('There are no cached chats yet.');$('zip').disabled=true;try {const zip=new JSZip();let n=0,bytes=0;for (const e of Object.values(job.entries)) {const record=await db.get('chats',`${scope.key}:${e.id}`);if(!record)continue;const json=JSON.stringify(record.data,null,2),md=markdown(record.data,e.id);bytes+=new TextEncoder().encode(json+md).length;if(bytes>250*1024*1024)throw new Error('The backup is too large for a memory-based ZIP. Your individual folder files remain available. Use Windows to compress the backup folder after the export finishes.');const name=e.basename || e.id;zip.file(`json/${name}.json`,json);zip.file(`markdown/${name}.md`,md);n++;}if(!n)throw new Error('No conversation data has been cached yet.');zip.file('export-report.json',JSON.stringify({...reportData(job),zip_cached_count:n},null,2));zip.file('conversation-index.json',JSON.stringify(indexData(job),null,2));zip.file('portable-state.json',JSON.stringify(portableData(job),null,2));download(await zip.generateAsync({type:'blob',compression:'DEFLATE'}),`chatgpt-cached-${n}-${new Date().toISOString().slice(0,10)}.zip`);} finally {$('zip').disabled=false;}});
   for(const id of ['passive','passive-hours','recent-check-minutes','attachments','download-images','library-enabled','smart-watch'])$(id).addEventListener('change',async()=>{if(!job)return;job.options.downloadImages=$('download-images').checked;if(id==='download-images')applyImagePreference(job);if(id==='download-images'&&job.options.downloadImages)for(const e of Object.values(job.entries || {}))if(e.status==='saved'){e.attachmentPending=true;e.attachmentRetryAt=0;e.attachmentScannedAt=0;}job.options.library=$('library-enabled').checked;job.options.smartWatch=$('smart-watch').checked;job.options.passive=$('passive').checked;job.options.passiveHours=Number($('passive-hours').value)||3;job.options.attachments=$('attachments').checked;job.options.yieldUser=$('yield-user').checked;job.schedule ||= newJob(scope,job.options).schedule;job.schedule.enabled=job.options.passive;if(id==='passive')job.schedule.suspended=!job.options.passive;job.schedule.intervalMs=job.options.passiveHours*3600000;if(id==='passive-hours' || id==='passive' && job.options.passive)job.schedule.nextScanAt=Date.now()+job.schedule.intervalMs;if(id==='recent-check-minutes'){job.schedule.recentIntervalMs=Number($('recent-check-minutes').value)*60000;job.schedule.nextCheckAt=Date.now();}job.updated=Date.now();update();try{await db.put('jobs',scope.key,job);if(root)await report(job);}catch(e){error(e);}update();});
   $('yield-user').addEventListener('change',()=>{if(!job){update();return;}job.message=setUserYield(job,$('yield-user').checked);engine?.wake?.();update();void db.put('jobs',scope.key,job).catch(error);});
-  tabId=(await chrome.storage.session.get('exporterTabId')).exporterTabId;scope=await db.get('meta','lastScope');if (scope) {job=await db.get('jobs',scope.key);if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`);attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;}initializing=false;applyJobOptionsToUI();update();setInterval(update,1000);setInterval(passiveTick,60000);chrome.runtime.onMessage.addListener(msg=>{if(msg?.type==='passive-tick')void passiveTick();});
+  tabId=(await chrome.storage.session.get('exporterTabId')).exporterTabId;scope=await db.get('meta','lastScope');if (scope) {job=await db.get('jobs',scope.key);if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`);attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;}initializing=false;applyJobOptionsToUI();update();setInterval(update,1000);setInterval(passiveTick,60000);chrome.runtime.onMessage.addListener(msg=>{if(msg?.type==='passive-tick')void passiveTick();});
   if (job?.status==='running' || job?.status==='watching' && job.schedule?.enabled && !job.schedule.suspended) {try {running=true;const restoring=engine={stopped:false};if(restoring.stopped)throw new Paused('Paused by you.');await connect(scope.key);if(restoring.stopped)throw new Paused('Paused by you.');running=false;await start(true);} catch(e){if(job){job.status='paused';job.message=`Saved progress found. ${e.message}`;await db.put('jobs',scope.key,job);}}finally{running=false;update();}}
   else if (job?.status==='pausing' || job?.status==='held') {job.status='paused';job.message='The previous live hold/run is no longer in memory, but its exact queue/cursors are preserved. Click Connect, then resume; no scan reset is performed.';await db.put('jobs',scope.key,job);update();}
 }

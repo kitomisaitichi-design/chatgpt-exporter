@@ -2,11 +2,11 @@
 
 Leave **Auto backup** enabled in the Library panel. Library discovery and downloads interleave with chat text, bounded attachment passes and local validation; **Scan Library / resume** starts a scan or resumes its saved queue. Folder/list pagination and error states remain in portable state. Library inventory refreshes every three hours while the passive watcher is enabled. Library failures do not convert saved transcripts into failed chats.
 
-The Library limit uses decimal MB: **strictly less than 10,000,000 bytes**. Known larger files are listed immediately; unknown-size streams are bounded and stopped when they exceed the limit. This differs from the older document-attachment feature's inclusive 10 MiB limit. Large files are never automatically downloaded by the Library worker.
+The Library limit uses decimal MB: **strictly less than 10,000,000 bytes**. Known larger files are listed immediately; unknown-size streams are bounded and stopped when they exceed the limit. New chat-attachment transfers use the same strict decimal boundary; retained older copies remain readable. Large files are never automatically downloaded by the Library worker.
 
 Use **10 MB or larger** to filter the dashboard, or **Save manual-download list** for a portable HTML list. Open the listed Library folder/source chat, find the filename and ID, and download it through ChatGPT. The manual list also records unavailable and permission-limited files for inspection. It opens ChatGPT pages rather than retaining expiring signed download URLs. Scanning supports known Library nodes and the Library query route; an unfamiliar response, repeated page or early end is reported as incomplete.
 
-Saved files use `attachments/library/<stable-file-id>/<original-name>`, so identical filenames do not overwrite one another. Matching existing small files are reused where size/name and uniqueness permit it. **Retry unavailable files** explicitly reopens unavailable/transient file work; known files at the size boundary remain manual.
+New saved files use `attachments/content/<sha256>/<first-name>`; legacy Library and chat paths remain readable. Local reuse searches permitted locations and prior indexes by native file ID or expected hash, verifies bytes, and supports renamed copies. Names and sizes alone do not prove identity. **Retry unavailable files** explicitly reopens unavailable/transient file work; known files at the size boundary remain manual.
 
 | Output | Purpose |
 | --- | --- |
@@ -24,4 +24,3 @@ The viewer can continue importing conversations through its existing index/nativ
 ## Activity controls
 
 Filter messages by search text, severity or category. **Pause log display** freezes only the displayed events; backups continue. Scrolling away from the bottom turns following off; **Jump to latest** resumes it. **Clear view** hides earlier events without deleting queue history, and **Show all / reset** restores them. Copy/TXT exports use the visible filter; full JSON exports use the retained history. Filters/follow preferences persist in the extension.
-

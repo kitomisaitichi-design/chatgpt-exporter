@@ -57,7 +57,9 @@ export class Engine {
       if(item.checkedUpdateTime && epoch(item.checkedUpdateTime)>epoch(e.checkedUpdateTime))e.checkedUpdateTime=item.checkedUpdateTime;
       if(item.basename && !e.basename)e.basename=item.basename;if(item.contentHash && !e.contentHash)e.contentHash=item.contentHash;if(item.previousContentHash && !e.previousContentHash)e.previousContentHash=item.previousContentHash;if(item.revisionCount)e.revisionCount=Math.max(e.revisionCount || 0,item.revisionCount);if(item.changedAt)e.changedAt=e.changedAt || item.changedAt;if(item.savedAt)e.savedAt=e.savedAt || item.savedAt;if(item.chatKind && !e.chatKind)e.chatKind=item.chatKind;if(item.chatKindEvidence && !e.chatKindEvidence)e.chatKindEvidence=item.chatKindEvidence;if(item.project)e.project=e.project || item.project;mergeInventoryAttachments(e,item);
       if(Array.isArray(item.foundVia))e.foundVia=[...new Set([...(e.foundVia || []),...item.foundVia])];
-      if(item.diskBacked){this.cachedIds.add(item.id);if(!wasRefresh && !e.refresh && before?.status!=='pending'){if(e.status!=='saved')diskSaved++;e.status='saved';e.error=null;e.retryAt=0;e.refresh=false;if(!e.savedAt)e.savedAt=this.now();}}
+      const verifiedPending=item.validated && item.contentHash && item.contentHash===e.contentHash && !before?.nativeWriteAt && epoch(item.update_time)>=epoch(e.update_time);
+      if(item.localRewrite){this.cachedIds.add(item.id);cacheOnly++;if(!wasRefresh&&!e.refresh&&epoch(item.update_time)>=epoch(e.update_time)){e.status='pending';e.retryAt=0;e.localDetectedRewrite=true;}}
+      else if(item.diskBacked){this.cachedIds.add(item.id);if(!wasRefresh && !e.refresh && (before?.status!=='pending' || verifiedPending)){if(e.status!=='saved')diskSaved++;e.status='saved';e.error=null;e.retryAt=0;e.refresh=false;if(!e.savedAt)e.savedAt=this.now();}}
       else if(item.cacheBacked){this.cachedIds.add(item.id);cacheOnly++;}
       else indexOnly++;
     }
@@ -96,7 +98,7 @@ export class Engine {
   }
   async process(entry) {
     const requestedUpdateTime=entry.update_time;
-    this.job.message=`Preparing: ${entry.title}`;await this.save();const key=`${this.job.scope.key}:${entry.id}`;let cached=await this.io.cacheGet(key), data,usedLocal=false;
+    this.job.message=`Preparing: ${entry.title}`;await this.save();const key=`${this.job.scope.key}:${entry.id}`;let cached=entry.localDetectedRewrite&&!entry.refresh&&this.io.diskRead?await this.io.diskRead(entry.id):await this.io.cacheGet(key), data,usedLocal=false;
     if(!cached && this.io.diskRead){cached=await this.io.diskRead(entry.id);if(cached){entry.basename=cached.basename;await this.io.cachePut(key,cached);this.cachedIds.add(entry.id);}}
     if(cached?.data && !entry.contentHash)entry.contentHash=cached.hash || await this.io.hash(cached.data);
     if (cached && !entry.refresh) {data=cached.data;usedLocal=true;}
@@ -131,7 +133,7 @@ export class Engine {
     // Attachment retrieval is deliberately a later network phase. Finish chat
     // discovery/transcript backup first so attachment waits cannot stall it.
     if(this.job.options.attachments!==false && !entry.attachmentScannedAt)entry.attachmentPending=true;
-    entry.basename=basename;entry.status='saved';entry.savedAt=this.now();entry.error=null;entry.retryAt=0;entry.refresh=false;entry.recoveryDeferredLogged=false;entry.changeReason=null;
+    entry.basename=basename;entry.status='saved';entry.savedAt=this.now();entry.error=null;entry.retryAt=0;entry.refresh=false;entry.localDetectedRewrite=false;entry.recoveryDeferredLogged=false;entry.changeReason=null;
     this.job.recentDone.push(this.now());this.job.recentDone=this.job.recentDone.slice(-30);this.job.phase=null;this.event(`${usedLocal?'Recovered/wrote local backup':'Downloaded'}: ${entry.title}`);await this.save();await this.io.report(this.job);
   }
   async processAttachments(entry) {
