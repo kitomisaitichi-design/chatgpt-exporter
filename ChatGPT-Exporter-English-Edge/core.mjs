@@ -1,4 +1,4 @@
-export const VERSION = '2.4.8';
+export const VERSION = '2.4.9';
 // Persisted chat attachments can legitimately lack a native file ID or label.
 export const compareText = (a,b) => String(a ?? '').localeCompare(String(b ?? ''));
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -142,7 +142,8 @@ export function mergeEntry(job, item, project) {
   if(/\bcodex\b/.test(surfaceProbe))Object.assign(job.entries[id],{chatKind:'codex',chatKindEvidence:'conversation list metadata contains Codex'});
   else if(/(?:^|[^a-z])work(?:[^a-z]|$)/.test(surfaceProbe))Object.assign(job.entries[id],{chatKind:'work',chatKindEvidence:'conversation list metadata contains Work'});
   else if(project)Object.assign(job.entries[id],{chatKind:'project-chat',chatKindEvidence:'discovered through a ChatGPT project'});
-  if(newer && !['local cache','existing backup file','imported portable state'].includes(item.origin) && epoch(item.update_time)>epoch(prev?.checkedUpdateTime))Object.assign(job.entries[id],{status:'pending',refresh:true,attempts:0,retryAt:0,changeReason:'newer server update timestamp',brokenUntil:0,lastFailureAt:0,lastFailureStatus:0});
+  const local=item.localDetected || item.diskBacked || item.cacheBacked || ['local cache','existing backup file','imported portable state','existing conversation index'].includes(item.origin);
+  if(newer && !local && epoch(item.update_time)>epoch(prev?.checkedUpdateTime))Object.assign(job.entries[id],{status:'pending',refresh:true,attempts:0,retryAt:0,changeReason:'newer server update timestamp',brokenUntil:0,lastFailureAt:0,lastFailureStatus:0});
   if(item.origin)job.entries[id].foundVia=[...new Set([...(prev?.foundVia || []),item.origin])];
   return !prev;
 }

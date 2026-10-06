@@ -6,9 +6,10 @@ const key=name=>String(name || '').normalize('NFC').trim().toLocaleLowerCase();
 const add=(map,k,value)=>{if(!k)return;const list=map.get(k)||[];list.push(value);map.set(k,list);};
 export async function scanLocalFileCopies(roots,scopeKey,{onProgress=()=>{},priorIndex=null}={}){
   const index=new Map(),byHash=new Map(),byId=new Map(),bySize=new Map(),hashCache=new Map(),stats={scanned:0,eligible:0,large:0,invalid:0,truncated:false,errors:0},seen=[];
-  for(const {handle,source} of roots){if(!handle)continue;if((await Promise.all(seen.map(h=>h.isSameEntry(handle)))).some(Boolean))continue;seen.push(handle);const walkStats={},hints=new Map();
+  for(const {handle,source} of roots){if(!handle)continue;if((await Promise.all(seen.map(h=>h.isSameEntry(handle)))).some(Boolean))continue;const covered=[...seen];seen.push(handle);const walkStats={},hints=new Map();
     const safe=p=>typeof p==='string'&&!p.includes('\\')&&!p.startsWith('/')&&p.split('/').every(s=>s&&s!=='.'&&s!=='..');
     const indexDirectory=async(dir,prefix)=>{
+      if(prefix)for(const h of covered)if(dir===h || dir.isSameEntry&&await dir.isSameEntry(h))return false;
       const lib=await readLocalJSON(dir,'library-index.json'),conv=await readLocalJSON(dir,'conversation-index.json');
       for(const f of [...(lib?.scope_key===scopeKey?lib.entries || []:[]),...(conv?.scope===scopeKey?(conv.entries || []).flatMap(e=>e.attachments || []):[])])if(safe(f.path)){const base=prefix.endsWith('attachments/')&&f.path.startsWith('attachments/')?prefix.slice(0,-12):prefix,path=handle.name==='attachments'&&!prefix&&f.path.startsWith('attachments/')?f.path.slice(12):base+f.path,old=hints.get(path)||[];old.push(f);hints.set(path,old);}
       return true;

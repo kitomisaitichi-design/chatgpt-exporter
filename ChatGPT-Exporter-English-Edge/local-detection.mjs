@@ -16,17 +16,16 @@ async function marker(dir,key){
 }
 export async function resolveBackupFolder(selected,key,{maxDepth=4,maxDirectories=400,onProgress=()=>{}}={}){
   const expected='chatgpt-backup-'+key.slice(0,12),first=await marker(selected,key);
-  if(first.foreign)throw Error('This backup belongs to a different account/workspace. Choose the matching backup or its parent folder.');
-  if(first.match || selected.name===expected)return {root:selected,path:selected.name,created:false,metadata:first,checked:1};
-  if(/^chatgpt-backup-[a-f0-9]{12}$/i.test(selected.name))throw Error('The selected backup name belongs to a different workspace. Choose the matching backup or a parent folder.');
+  if(!first.foreign&&(first.match || selected.name===expected))return {root:selected,path:selected.name,created:false,metadata:first,checked:1};
   const queue=[{dir:selected,path:selected.name,depth:0}],matches=[];let checked=0,truncated=false;
   while(queue.length){const {dir,path,depth}=queue.shift();if(++checked>maxDirectories){truncated=true;break;}if(checked%20===0){onProgress({directories:checked});await yieldUI();}
-    const m=dir===selected?first:await marker(dir,key);if(m.foreign || /^chatgpt-backup-[a-f0-9]{12}$/i.test(dir.name)&&dir.name!==expected&&!m.match)continue;
-    if(m.match || dir.name===expected){matches.push({root:dir,path,created:false,metadata:m,checked});continue;}
+    const m=dir===selected?first:await marker(dir,key);
+    if(!m.foreign&&(m.match || dir.name===expected)){matches.push({root:dir,path,created:false,metadata:m,checked});continue;}
     if(depth>=maxDepth)continue;
-    for await(const [name,handle] of dir.entries())if(handle.kind==='directory'&&!['attachments','markdown','attachment-errors','.git','node_modules'].includes(name))queue.push({dir:handle,path:path+'/'+name,depth:depth+1});
+    for await(const [name,handle] of dir.entries())if(handle.kind==='directory'&&!['attachments','markdown','attachment-errors','.git','node_modules',...(m.foreign?['json']:[])].includes(name))queue.push({dir:handle,path:path+'/'+name,depth:depth+1});
   }
   if(matches.length){matches.sort((a,b)=>Number(b.root.name===expected)-Number(a.root.name===expected)||a.path.split('/').length-b.path.split('/').length||a.path.localeCompare(b.path));return {...matches[0],candidates:matches.length,checked,truncated};}
+  if(first.foreign || /^chatgpt-backup-[a-f0-9]{12}$/i.test(selected.name))throw Error('This backup belongs to a different account/workspace and contains no matching nested backup. Choose the matching backup or its parent folder.');
   // A legacy root with json/ or directly selected transcript subfolder is valid.
   let direct=false;for await(const [name,h] of selected.entries())if(h.kind==='file'&&/\.json$/i.test(name)&&!['conversation-index.json','portable-state.json','export-report.json'].includes(name)){const data=await readLocalJSON(selected,name,32*1024*1024);if(Array.isArray(data)?data.some(x=>validId(x?.conversation_id || x?.id)&&conversationValid(x,x.conversation_id || x.id)):validId(data?.conversation_id || data?.id)&&conversationValid(data,data.conversation_id || data.id)){direct=true;break;}}
   if(first.layout || direct)return {root:selected,path:selected.name,created:false,metadata:first,checked,truncated,legacy:true};
@@ -44,24 +43,34 @@ export async function* walkLocalFiles(start,{maxDepth=12,maxFiles=50000,maxDirec
     onProgress({...stats});await yieldUI();
   }
 }
-export async function scanTranscriptInventory(root,key,{onProgress=()=>{},maxFiles=50000,maxDepth=12,hashData=async()=>null}={}){
-  const m=await marker(root,key);if(m.foreign)throw Error('Backup metadata belongs to another workspace.');
-  const metadata=new Map((m.index?.scope===key?m.index.entries || []:[]).filter(e=>validId(e.id)).map(e=>[e.id,e])),byPath=new Map([...metadata.values()].filter(e=>safePath(e.json)).map(e=>[e.json,e])),files=new Map(),entries=new Map(),stats={};
+export async function scanTranscriptInventory(root,key,{onProgress=()=>{},maxFiles=50000,maxDepth=12,hashData=async()=>null,scopeUser=null,knownIds=null,cache=new Map(),excludeRoots=[]}={}){
+  const m=await marker(root,key),canImport=x=>x.foreign&&scopeUser&&x.state?.job?.scope?.user===scopeUser&&knownIds;
+  if(m.foreign&&!canImport(m))throw Object.assign(Error('Backup metadata belongs to another workspace.'),{code:'FOREIGN_BACKUP'});
+  const metadata=new Map((m.index?.scope===key || canImport(m)?m.index?.entries || []:[]).filter(e=>validId(e.id)&&(!m.foreign||knownIds.has(e.id))).map(e=>[e.id,e])),byPath=new Map([...metadata.values()].filter(e=>safePath(e.json)).map(e=>[e.json,e])),files=new Map(),entries=new Map(),stats={},contexts=new Map([['',m]]),nextCache=new Map();
   for(const e of metadata.values())entries.set(e.id,{id:e.id,title:e.title,update_time:e.update_time,create_time:e.create_time,checkedUpdateTime:e.checked_update_time,contentHash:e.content_hash || null,basename:safePath(e.json)&&e.json.startsWith('json/')?e.json.slice(5,-5):null,indexStatus:e.status || 'pending',attachments:e.attachments || [],attachmentStateRevision:e.attachment_state_revision || 0,attachmentScannedAt:e.attachment_scanned_at || 0,attachmentPending:!!e.attachment_pending,origin:'existing conversation index'});
-  let valid=0,invalid=0,tooLarge=0,rewrites=0;
-  for await(const item of walkLocalFiles(root,{maxFiles,maxDepth,stats,onProgress,acceptDirectory:async(dir,path)=>{if(!path)return true;const m=await marker(dir,key);return !m.foreign&&(!/^chatgpt-backup-[a-f0-9]{12}$/i.test(dir.name)||dir.name==='chatgpt-backup-'+key.slice(0,12)||m.match);},exclude:(name,h)=>h.kind==='directory'&&['attachments','markdown','attachment-errors','.git','node_modules'].includes(name)})){
+  let valid=0,invalid=0,tooLarge=0,rewrites=0,reused=0;const knownKey=knownIds?await hashData([...knownIds].sort())||[...knownIds].sort().join('|'):null;
+  for await(const item of walkLocalFiles(root,{maxFiles,maxDepth,stats,onProgress,acceptDirectory:async(dir,path)=>{if(!path)return true;for(const h of excludeRoots)if(dir===h || dir.isSameEntry&&await dir.isSameEntry(h))return false;const own=await marker(dir,key),parent=contexts.get(path.slice(0,path.slice(0,-1).lastIndexOf('/')+1))||m,current=own.recognized?own:parent;contexts.set(path,current);return !current.foreign||!!canImport(current);},exclude:(name,h)=>h.kind==='directory'&&['attachments','markdown','attachment-errors','.git','node_modules'].includes(name)})){
     if(!/\.json$/i.test(item.name)||['conversation-index.json','portable-state.json','export-report.json','viewer-handoff.json'].includes(item.name))continue;
-    const blob=await item.handle.getFile();if(blob.size>64*1024*1024){tooLarge++;continue;}let parsed;try{parsed=JSON.parse(await blob.text());}catch{invalid++;continue;}
+    const blob=await item.handle.getFile();if(blob.size>64*1024*1024){tooLarge++;continue;}
+    const prior=cache.get(item.path),context=contexts.get(item.prefix)||m;
+    const insert=f=>{if(context.foreign&&!knownIds?.has(f.entry.id))return;const old=files.get(f.entry.id);if(old&&old.score>=f.score)return;const copy={...f,entry:{...f.entry}};files.set(f.entry.id,copy);entries.set(f.entry.id,copy.entry);};
+    const filterKey=context.foreign?knownKey:null;
+    if(prior&&prior.filterKey===filterKey&&prior.size===blob.size&&prior.lastModified===blob.lastModified&&item.handle.isSameEntry&&await item.handle.isSameEntry(prior.handle)){
+      const records=prior.records.map(r=>{const saved=metadata.get(r.entry.id);return {...r,entry:{...r.entry,checkedUpdateTime:saved?saved.content_hash===r.entry.contentHash?saved.checked_update_time:null:r.entry.checkedUpdateTime}};});for(const r of records)insert({...r,handle:item.handle});nextCache.set(item.path,{...prior,handle:item.handle,records});reused++;continue;
+    }
+    let parsed;try{parsed=JSON.parse(await blob.text());}catch{invalid++;continue;}const records=[];
     const bodies=Array.isArray(parsed)?parsed:[parsed];
     for(const data of bodies){const id=data?.conversation_id || data?.id || byPath.get(item.path)?.id;if(!validId(id)||!conversationValid(data,id)){invalid++;continue;}
-      const old=files.get(id),score=epoch(data.update_time)||blob.lastModified;if(old&&old.score>=score)continue;
+      if(context.foreign&&!knownIds?.has(id))continue;
+      const score=epoch(data.update_time)||blob.lastModified;
       const saved=metadata.get(id)||{},canonical=!Array.isArray(parsed)&&item.path.startsWith('json/'),basename=canonical?item.path.slice(5,-5):safeName(data.title || saved.title || 'Recovered chat',65)+'_'+id;
-      const entry={...(entries.get(id)||{}),id,title:data.title || saved.title || 'Recovered local chat',update_time:data.update_time || saved.update_time,create_time:data.create_time || saved.create_time || conversationTime(data) || null,contentHash:await hashData(data),basename,diskBacked:canonical,validated:canonical,localRewrite:!canonical,cacheBacked:!canonical,localDetected:true,inventoryStatus:canonical?'saved':'pending',origin:canonical?'validated existing backup file':'nested/renamed local transcript'};
-      files.set(id,{handle:item.handle,basename,entry,score,arrayId:Array.isArray(parsed)?id:null});entries.set(id,entry);
+      const contentHash=await hashData(data),entry={...(entries.get(id)||{}),id,title:data.title || saved.title || 'Recovered local chat',update_time:data.update_time || saved.update_time,create_time:data.create_time || saved.create_time || conversationTime(data) || null,checkedUpdateTime:saved.content_hash===contentHash?saved.checked_update_time:null,contentHash,basename,diskBacked:canonical,validated:true,localRewrite:!canonical,cacheBacked:!canonical,localDetected:true,inventoryStatus:canonical?'saved':'pending',origin:canonical?'validated existing backup file':'nested/renamed local transcript'};
+      const record={basename,entry,score,arrayId:Array.isArray(parsed)?id:null};records.push(record);insert({...record,handle:item.handle});
     }
+    nextCache.set(item.path,{handle:item.handle,size:blob.size,lastModified:blob.lastModified,filterKey,records});
   }
   for(const f of files.values()){valid++;if(f.entry.localRewrite)rewrites++;}
-  return {files,entries,metadata:m,stats:{...stats,valid,invalid,tooLarge,rewrites,indexOnly:entries.size-files.size}};
+  return {files,entries,cache:nextCache,metadata:m,stats:{...stats,valid,invalid,tooLarge,rewrites,reused,indexOnly:entries.size-files.size}};
 }
 export async function readDetectedTranscript(found){
   const file=await found.handle.getFile(),parsed=JSON.parse(await file.text()),data=found.arrayId?parsed.find(x=>(x.conversation_id || x.id)===found.arrayId):parsed;

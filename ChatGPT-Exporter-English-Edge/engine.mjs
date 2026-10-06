@@ -53,13 +53,16 @@ export class Engine {
   async reconcileInventory(items=[]) {
     let diskSaved=0,indexOnly=0,cacheOnly=0;this.job.phase='local';this.job.message='Reconciling the existing backup locally — no ChatGPT requests are being made.';this.io.changed?.(this.job);
     for(const item of items){
-      const before=this.job.entries[item.id],wasRefresh=!!before?.refresh;mergeEntry(this.job,item);const e=this.job.entries[item.id];if(!e)continue;
+      const before={...this.job.entries[item.id]},wasRefresh=!!before.refresh;mergeEntry(this.job,{...item,localDetected:true});const e=this.job.entries[item.id];if(!e)continue;
       if(item.checkedUpdateTime && epoch(item.checkedUpdateTime)>epoch(e.checkedUpdateTime))e.checkedUpdateTime=item.checkedUpdateTime;
       if(item.basename && !e.basename)e.basename=item.basename;if(item.contentHash && !e.contentHash)e.contentHash=item.contentHash;if(item.previousContentHash && !e.previousContentHash)e.previousContentHash=item.previousContentHash;if(item.revisionCount)e.revisionCount=Math.max(e.revisionCount || 0,item.revisionCount);if(item.changedAt)e.changedAt=e.changedAt || item.changedAt;if(item.savedAt)e.savedAt=e.savedAt || item.savedAt;if(item.chatKind && !e.chatKind)e.chatKind=item.chatKind;if(item.chatKindEvidence && !e.chatKindEvidence)e.chatKindEvidence=item.chatKindEvidence;if(item.project)e.project=e.project || item.project;mergeInventoryAttachments(e,item);
       if(Array.isArray(item.foundVia))e.foundVia=[...new Set([...(e.foundVia || []),...item.foundVia])];
-      const verifiedPending=item.validated && item.contentHash && item.contentHash===e.contentHash && !before?.nativeWriteAt && epoch(item.update_time)>=epoch(e.update_time);
-      if(item.localRewrite){this.cachedIds.add(item.id);cacheOnly++;if(!wasRefresh&&!e.refresh&&epoch(item.update_time)>=epoch(e.update_time)){e.status='pending';e.retryAt=0;e.localDetectedRewrite=true;}}
-      else if(item.diskBacked){this.cachedIds.add(item.id);if(!wasRefresh && !e.refresh && (before?.status!=='pending' || verifiedPending)){if(e.status!=='saved')diskSaved++;e.status='saved';e.error=null;e.retryAt=0;e.refresh=false;if(!e.savedAt)e.savedAt=this.now();}}
+      const replyPending=wasRefresh && before.changeReason!=='newer server update timestamp';
+      const pendingBody=before.status==='pending' && !wasRefresh && (before.changeReason==='passively observed conversation body changed'&&before.observedBodyHash&&before.observedBodyHash!==item.contentHash || before.contentHash && before.contentHash!==item.contentHash && epoch(item.update_time)<=epoch(before.update_time));
+      const covers=Math.max(epoch(item.update_time),epoch(item.checkedUpdateTime))>=epoch(e.update_time) || !wasRefresh&&(before.status==='saved'||before.localPreviouslySaved)&&before.contentHash&&before.contentHash===item.contentHash;
+      const verifiedPending=item.validated && item.contentHash && covers && !replyPending && !pendingBody;
+      if(item.localRewrite){this.cachedIds.add(item.id);cacheOnly++;if(verifiedPending || !wasRefresh&&!e.refresh&&covers&&!pendingBody){e.status='pending';e.retryAt=0;e.refresh=false;e.localDetectedRewrite=true;e.changeReason=null;}}
+      else if(item.diskBacked){this.cachedIds.add(item.id);if(verifiedPending || !wasRefresh && !e.refresh && before.status!=='pending'){if(e.status!=='saved')diskSaved++;e.status='saved';e.error=null;e.retryAt=0;e.refresh=false;e.changeReason=null;if(item.basename)e.basename=item.basename;if(item.contentHash)e.contentHash=item.contentHash;if(!e.savedAt)e.savedAt=this.now();}}
       else if(item.cacheBacked){this.cachedIds.add(item.id);cacheOnly++;}
       else indexOnly++;
     }
@@ -101,6 +104,10 @@ export class Engine {
     this.job.message=`Preparing: ${entry.title}`;await this.save();const key=`${this.job.scope.key}:${entry.id}`;let cached=entry.localDetectedRewrite&&!entry.refresh&&this.io.diskRead?await this.io.diskRead(entry.id):await this.io.cacheGet(key), data,usedLocal=false;
     if(!cached && this.io.diskRead){cached=await this.io.diskRead(entry.id);if(cached){entry.basename=cached.basename;await this.io.cachePut(key,cached);this.cachedIds.add(entry.id);}}
     if(cached?.data && !entry.contentHash)entry.contentHash=cached.hash || await this.io.hash(cached.data);
+    if(cached?.data && !entry.refresh && !entry.localDetectedRewrite && !entry.localPreviouslySaved && epoch(cached.data.update_time)<epoch(entry.update_time) && epoch(entry.checkedUpdateTime)<epoch(entry.update_time))cached=null;
+    // Recovery must not fall back to an older body after reconciliation kept
+    // a newer pending revision. A matching cache can still finish it locally.
+    if(cached?.data && !entry.refresh && !entry.localDetectedRewrite && entry.contentHash){const expected=entry.changeReason==='passively observed conversation body changed'?entry.observedBodyHash || entry.contentHash:entry.contentHash;if((cached.hash || await this.io.hash(cached.data))!==expected)cached=null;}
     if (cached && !entry.refresh) {data=cached.data;usedLocal=true;}
     else if(cached && entry.refresh && cached.passive && cached.data.update_time && cached.data.update_time===entry.update_time && (!entry.nativeWriteAt || cached.at>=entry.nativeWriteAt)){data=cached.data;usedLocal=true;}
     if (!data) {
@@ -133,7 +140,7 @@ export class Engine {
     // Attachment retrieval is deliberately a later network phase. Finish chat
     // discovery/transcript backup first so attachment waits cannot stall it.
     if(this.job.options.attachments!==false && !entry.attachmentScannedAt)entry.attachmentPending=true;
-    entry.basename=basename;entry.status='saved';entry.savedAt=this.now();entry.error=null;entry.retryAt=0;entry.refresh=false;entry.localDetectedRewrite=false;entry.recoveryDeferredLogged=false;entry.changeReason=null;
+    entry.basename=basename;entry.status='saved';entry.savedAt=this.now();entry.error=null;entry.retryAt=0;entry.refresh=false;entry.localDetectedRewrite=false;entry.localPreviouslySaved=false;entry.recoveryDeferredLogged=false;entry.changeReason=null;
     this.job.recentDone.push(this.now());this.job.recentDone=this.job.recentDone.slice(-30);this.job.phase=null;this.event(`${usedLocal?'Recovered/wrote local backup':'Downloaded'}: ${entry.title}`);await this.save();await this.io.report(this.job);
   }
   async processAttachments(entry) {

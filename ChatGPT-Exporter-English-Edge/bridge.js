@@ -1,16 +1,18 @@
 // Same-origin/read-only ChatGPT bridge. Authentication remains inside ChatGPT.
 (() => {
-  if (window.__englishExporterBridgeV248) return;
+  if (window.__englishExporterBridgeV249) return;
   const originalFetch = window.fetch.bind(window);
   const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map(), changedChats=new Map(), libraryItems=new Map(),libraryRoutes=new Map();
   const documentId=crypto.randomUUID(), loadedAt=Date.now();
   let routeAt=loadedAt,lastPath=location.pathname,inFlight=0,activeStreams=0,lastStart=0,lastWrite=0,lastUserInteraction=0,seq=0,events=[],blocked=null;
   const markUserInteraction=()=>{lastUserInteraction=Date.now();};
   for(const type of ['pointerdown','keydown','wheel','touchstart'])window.addEventListener(type,markUserInteraction,{capture:true,passive:true});
-  let token = null, user = null, sessionAt = 0, accountHeader = null, pending = null, device = null,lastLimit = null;
+  let token = null, user = null, sessionAt = 0, accountHeader = null, accountHeaderSelector = null, pending = null, device = null,lastLimit = null;
   const frontendHeaders=new Map();
   const cookie = name => {const value = document.cookie.split('; ').find(x => x.startsWith(name+'='))?.slice(name.length+1);try { return value ? decodeURIComponent(value) : null; } catch { return value || null; }};
-  const workspace = () => cookie('_account') || accountHeader || null;
+  // The personal selector cookie is a label, while native requests carry the
+  // actual workspace UUID. Do not let the label override an observed UUID.
+  const workspace = () => {const selected=cookie('_account');return selected==='personal'&&accountHeader&&accountHeaderSelector===selected?accountHeader:selected || accountHeader || null;};
   const snapshotScope = () => ({user, account:workspace()});
   const scoped = value => value && (!value.scope?.user || value.scope.user===user) && (value.scope?.account || null)===workspace();
   function hint(item,scope,origin) {
@@ -53,7 +55,7 @@
   window.fetch = async function(resource, options) {
     let url;try { url = new URL(typeof resource === 'string' || resource instanceof URL ? resource : resource.url, location.href); } catch {}
     const internal = url?.origin === location.origin && url.pathname.startsWith('/backend-api/');
-    if (internal) {try {const headers = new Headers(resource instanceof Request ? resource.headers : undefined);new Headers(options?.headers).forEach((v,k) => headers.set(k,v));const auth = headers.get('authorization');if (auth?.startsWith('Bearer ') && auth !== 'Bearer dummy') token = auth.slice(7);if (headers.has('chatgpt-account-id')) accountHeader = headers.get('chatgpt-account-id');if (headers.has('oai-device-id')) device = headers.get('oai-device-id');if (headers.has('x-oai-is-pending-updates')) pending = headers.get('x-oai-is-pending-updates');for(const name of ['oai-did','originator','x-openai-web-frontend','x-openai-codex-window-type','x-oai-mcp-form-version']){const value=headers.get(name);if(value && value.length<=200 && !/[\r\n]/.test(value))frontendHeaders.set(name,value);}} catch {}}
+    if (internal) {try {const headers = new Headers(resource instanceof Request ? resource.headers : undefined);new Headers(options?.headers).forEach((v,k) => headers.set(k,v));const auth = headers.get('authorization');if (auth?.startsWith('Bearer ') && auth !== 'Bearer dummy') token = auth.slice(7);if (headers.has('chatgpt-account-id')){accountHeader = headers.get('chatgpt-account-id');accountHeaderSelector=cookie('_account');}if (headers.has('oai-device-id')) device = headers.get('oai-device-id');if (headers.has('x-oai-is-pending-updates')) pending = headers.get('x-oai-is-pending-updates');for(const name of ['oai-did','originator','x-openai-web-frontend','x-openai-codex-window-type','x-oai-mcp-form-version']){const value=headers.get(name);if(value && value.length<=200 && !/[\r\n]/.test(value))frontendHeaders.set(name,value);}} catch {}}
     const scope = snapshotScope(),write=!['GET','HEAD'].includes(String(options?.method || (resource instanceof Request?resource.method:'GET')).toUpperCase());
     const conversationWrite=internal && write && /^\/backend-api\/(?:f\/)?conversation(?:\/[a-zA-Z0-9_-]+)?$/.test(url.pathname);
     const historyRead=internal && !write && (/^\/backend-api\/conversations(?:\/search)?\/?$/.test(url.pathname) || /^\/backend-api\/conversation\/[a-zA-Z0-9_-]+$/.test(url.pathname) || /^\/backend-api\/gizmos\/[^/]+\/conversations$/.test(url.pathname) || url.pathname==='/backend-api/gizmos/snorlax/sidebar' || /\/files\/download\//.test(url.pathname) || /\/interpreter\/download$/.test(url.pathname));
@@ -157,13 +159,14 @@
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV248',{value:{rpc,version:'2.4.8'}, configurable:false,writable:false});
-  if(!window.__englishExporterBridgeV247)Object.defineProperty(window,'__englishExporterBridgeV247',{value:window.__englishExporterBridgeV248});
-  if(!window.__englishExporterBridgeV246)Object.defineProperty(window,'__englishExporterBridgeV246',{value:window.__englishExporterBridgeV248});
-  if(!window.__englishExporterBridgeV245)Object.defineProperty(window,'__englishExporterBridgeV245',{value:window.__englishExporterBridgeV248});
-  if(!window.__englishExporterBridgeV244)Object.defineProperty(window,'__englishExporterBridgeV244',{value:window.__englishExporterBridgeV248});
-  if(!window.__englishExporterBridgeV243)Object.defineProperty(window,'__englishExporterBridgeV243',{value:window.__englishExporterBridgeV248});
-  if(!window.__englishExporterBridgeV242)Object.defineProperty(window,'__englishExporterBridgeV242',{value:window.__englishExporterBridgeV248});
-  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV248});
-  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV248});
+  Object.defineProperty(window,'__englishExporterBridgeV249',{value:{rpc,version:'2.4.8'}, configurable:false,writable:false});
+  if(!window.__englishExporterBridgeV248)Object.defineProperty(window,'__englishExporterBridgeV248',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV247)Object.defineProperty(window,'__englishExporterBridgeV247',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV246)Object.defineProperty(window,'__englishExporterBridgeV246',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV245)Object.defineProperty(window,'__englishExporterBridgeV245',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV244)Object.defineProperty(window,'__englishExporterBridgeV244',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV243)Object.defineProperty(window,'__englishExporterBridgeV243',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV242)Object.defineProperty(window,'__englishExporterBridgeV242',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV249});
+  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV249});
 })();
