@@ -60,7 +60,7 @@ function paint() {
 async function bridge(args,targetId=tabId) {
   if (!targetId) throw new Paused('Connect to ChatGPT first.');
   let timer;let results;
-  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV249) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV249.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
+  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV2410) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV2410.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
   return results[0]?.result || {ok:false,status:0,kind:'bridge'};
 }
 async function sense(expected) {
@@ -205,10 +205,11 @@ function reportData(j) {
 function indexData(j) { const fileMap=libraryFileMap(j);
   return {schema:'chatgpt-conversation-index/v1',library_index:'attachments/library-index.json',viewer_handoff:'viewer-handoff.json',version:VERSION,generated_at:new Date().toISOString(),scope:j.scope.key,total:Object.keys(j.entries).length,order:'calendar create time (earliest known conversation/message time)',entries:Object.values(j.entries).sort((a,b)=>(epoch(a.create_time)||epoch(a.update_time)||Infinity)-(epoch(b.create_time)||epoch(b.update_time)||Infinity)).map(e=>({id:e.id,url:`https://chatgpt.com/c/${e.id}`,title:e.title,status:e.status,create_time:e.create_time || null,update_time:e.update_time,checked_update_time:e.checkedUpdateTime || null,chat_kind:e.chatKind || (e.projectId?'project-chat':'unknown'),chat_kind_evidence:e.chatKindEvidence || null,project:e.project || null,found_via:e.foundVia || [],saved_at:e.savedAt || null,content_hash:e.contentHash || null,previous_content_hash:e.previousContentHash || null,revision_count:e.revisionCount || 0,changed_at:e.changedAt || null,json:e.basename?`json/${e.basename}.json`:null,markdown:e.basename?`markdown/${e.basename}.md`:null,attachments:conversationFiles(j,e,fileMap),attachment_state_revision:e.attachmentStateRevision || 0,attachment_scanned_at:e.attachmentScannedAt || null,attachment_pending:!!e.attachmentPending,attachment_retry_at:e.attachmentRetryAt || 0,error:e.error || null,last_failure_at:e.lastFailureAt || null,last_failure_status:e.lastFailureStatus || null,broken_until:e.brokenUntil || 0}))};
 }
-let diskScanStats={};
+let diskScanStats={},diskKnownCount=-1;
 async function diskInventory() {
-  if(diskFiles&&diskIndexEntries)return [...diskIndexEntries.values()];diskFiles=new Map();diskIndexEntries=new Map();if(!root)return [];
-  const sources=[root],extra=[backupInput,...locations.filter(x=>x.role==='backup').map(x=>x.handle)];
+  const knownCount=Object.keys(job?.entries || {}).length;
+  if(diskFiles&&diskIndexEntries&&diskKnownCount===knownCount)return [...diskIndexEntries.values()];diskFiles=new Map();diskIndexEntries=new Map();if(!root)return [];
+  const sources=[root],extra=[backupInput,attachmentLibrary,...locations.map(x=>x.handle)];
   for(const h of extra)if(h&&await h.queryPermission({mode:'read'})==='granted'&&!(await Promise.all(sources.map(x=>x.isSameEntry(h)))).some(Boolean))sources.push(h);
   diskScanStats={files:0,valid:0,invalid:0,tooLarge:0,truncated:false,errors:0,reused:0};const oldSearch=await db.get('meta',`transcriptSearchIndex:${scope.key}`)||[],search=[],scanned=[];
   for(const source of sources){
@@ -220,7 +221,7 @@ async function diskInventory() {
     for(const [id,e] of scan.entries)if(!diskIndexEntries.has(id))diskIndexEntries.set(id,e);
     for(const [id,f] of scan.files){const previous=diskFiles.get(id);if(previous&&previous.score>=f.score)continue;if(source!==root)Object.assign(f.entry,{diskBacked:false,cacheBacked:true,localRewrite:true});diskFiles.set(id,f);diskIndexEntries.set(id,f.entry);}
   }
-  await db.put('meta',`transcriptSearchIndex:${scope.key}`,search);diskScanStats.valid=diskFiles.size;return [...diskIndexEntries.values()];
+  await db.put('meta',`transcriptSearchIndex:${scope.key}`,search);diskKnownCount=knownCount;diskScanStats.valid=diskFiles.size;return [...diskIndexEntries.values()];
 }
 async function diskRead(id) {await diskInventory();const found=diskFiles.get(id);if(!found)return null;try{const result=await readDetectedTranscript(found);return result?{...result,hash:await hashData(result.data),passive:false}:null;}catch(e){if(['NotFoundError','TypeMismatchError'].includes(e.name)||e instanceof SyntaxError)return null;throw e;}}
 
