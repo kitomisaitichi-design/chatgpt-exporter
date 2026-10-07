@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {newJob} from '../ChatGPT-Exporter-English-Edge/core.mjs';
+import {processLibrary,libraryState} from '../ChatGPT-Exporter-English-Edge/library.mjs';
+import {Engine} from '../ChatGPT-Exporter-English-Edge/engine.mjs';
+const scope={key:'permission-fixture',user:'fixture'};
+test('local Library permission/quota loss pauses without consuming transfer attempts',async()=>{for(const name of ['NotAllowedError','SecurityError','QuotaExceededError']){const job=newJob(scope),f={id:'file_permission',name:'a.txt',size:5,status:'pending',attempts:1};libraryState(job).entries[f.id]=f;const engine={job,now:()=>1000,save:async()=>{},event:()=>{},io:{libraryDownload:async()=>{throw Object.assign(Error('Local folder access lost'),{name});},report:async()=>{}}};await assert.rejects(processLibrary(engine,{file:f}),{name});assert.equal(f.attempts,1);assert.ok(!f.parked);}});
+test('local attachment permission/quota loss reaches the paused worker without a six-hour retry',async()=>{for(const name of ['NotAllowedError','SecurityError','QuotaExceededError']){const job=newJob(scope),entry={id:'chat_permission',status:'saved',attachments:[]},data={mapping:{n:{message:{metadata:{attachments:[{id:'file_permission',name:'a.txt',size:5}]},content:{parts:[]}}}}};job.entries[entry.id]=entry;const engine=new Engine(job,{now:()=>1000,save:async()=>{},cacheGet:async()=>({data}),attachments:async()=>{throw Object.assign(Error('Local folder access lost'),{name});},report:async()=>{}});await assert.rejects(engine.processAttachments(entry),{name});assert.equal(entry.attachmentRetryAt,undefined);}});
