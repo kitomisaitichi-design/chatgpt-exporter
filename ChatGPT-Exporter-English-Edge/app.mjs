@@ -1,5 +1,6 @@
 import {seedFileSources,observeChatFiles,sharedFileCandidates,sharedFileBudget,rememberFileResult,retryLinkedFile,fileReferences} from './file-links.mjs';
-import {ContentStore,validHash,isImage,applyImagePreference} from './file-intelligence.mjs';
+import {ContentStore,validHash,isImage,applyImagePreference,contentHash,rememberVerifiedBlob} from './file-intelligence.mjs';
+import {LocalIndexSession} from './local-index.mjs';
 import {LibraryPanel} from './library-ui.mjs';
 import {LIBRARY_LIMIT,libraryState,queueLibraryScan,libraryIndex,libraryPath,libraryCandidates,manualFiles,retryLibraryFile,LIBRARY_FAILURE_LIMIT} from './library.mjs';
 import {CatalogWriter} from './catalog-writer.mjs';
@@ -17,7 +18,7 @@ import {createRenderScheduler} from './ui-scheduler.mjs';
 import {createDashboardStats} from './dashboard-state.mjs';
 import {setUserYield,userYieldStatus} from './live-settings.mjs';
 import {resolveBackupFolder,scanTranscriptInventory,readDetectedTranscript,mergeFolderMetadata} from './local-detection.mjs';
-import {scanLocalFileCopies,localCopyCandidates,verifyLocalCopy} from './local-files.mjs';
+import {iterateLocalCopyCandidates,verifyLocalCopy} from './local-files.mjs';
 const $=id=>document.getElementById(id);
 const getDashboardStats=createDashboardStats(),renderer=createRenderScheduler(paint);
 function update(){renderer.request();}
@@ -48,7 +49,7 @@ function paint() {
   for (const id of ['connect','folder','attachment-library','repair-attachments','retry','scan','add','archived','projects','assist','verify','attachments','passive','passive-hours','recent-check-minutes','smart-watch','library-enabled','library-scan','library-retry','library-deduplicate','download-images','work-mode','export-state','import-state']) $(id).disabled=running || !canEdit || initializing;
   $('yield-user').disabled=!canEdit || initializing;
   $('yield-status').textContent=userYieldStatus(job || {options:{yieldUser:$('yield-user').checked}});
-  if(initializing || detecting)$('start').disabled=true;if(detecting)for(const id of ['folder','attachment-library','local-rescan','connect'])$(id).disabled=true;$('local-rescan').disabled=running || detecting || !scope || !canEdit;$('local-scan-status').textContent=localSummary;
+  if(initializing || detecting)$('start').disabled=true;if(detecting)for(const id of ['folder','attachment-library','local-rescan','connect'])$(id).disabled=true;$('local-rescan').disabled=running || detecting || !scope || !canEdit;$('local-scan-status').textContent=localSummary;const m=job?.localMaintenance;$('local-maintenance-status').textContent=m?`Background: ${engine?.held?'held':engine?.stopped||job.status==='paused'?'suspended':m.stage || 'idle'} · ${m.checked || 0} hashed/checked · ${m.linked || 0} links · ${m.deferred || 0} deferred · last progress ${m.lastProgressAt?new Date(m.lastProgressAt).toLocaleTimeString():'waiting'}${m.errors?.length?' · '+m.errors.length+' need attention':''}. Physical copies are kept until manual cleanup.`:'Background linking will check one file at a time after foreground work or during network waits.';
   const schedule=job?.schedule || {},stamp=t=>t?new Date(t).toLocaleTimeString():'not yet',recent=Math.max(0,(schedule.nextCheckAt || Date.now())-Date.now());
   const observedAgo=schedule.lastTelemetryAt?Math.floor((Date.now()-schedule.lastTelemetryAt)/1000):null;
   const waiting=Math.max(job?.pace.until || 0,schedule.checkWaitUntil || 0)>Date.now();
@@ -60,7 +61,7 @@ function paint() {
 async function bridge(args,targetId=tabId) {
   if (!targetId) throw new Paused('Connect to ChatGPT first.');
   let timer;let results;
-  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV2410) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV2410.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
+  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV2411) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV2411.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
   return results[0]?.result || {ok:false,status:0,kind:'bridge'};
 }
 async function sense(expected) {
@@ -170,7 +171,7 @@ function migrateLoadedJob(j){
 }
 async function connect(expectedKey=null) {
   $('message').textContent='Connecting to your signed-in ChatGPT session…';await ensureTab();const result=await readyBridge(),nextScope={...result.scope,key:await digest(JSON.stringify([result.scope.user,result.scope.account || null]))};
-  if (expectedKey && nextScope.key!==expectedKey) throw new Paused('The account or workspace changed. Automatic resume stopped; reconnect to the original workspace.');scope=nextScope;connected=true;await db.put('meta','lastScope',scope);job=await db.get('jobs',scope.key) || null;if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`) || null;attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;root=null;rootDetection=null;backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;sensed.at=0;applyJobOptionsToUI();update();if (!job) $('message').textContent='Connected. Choose a folder, then start the automatic export.';
+  if (expectedKey && nextScope.key!==expectedKey) throw new Paused('The account or workspace changed. Automatic resume stopped; reconnect to the original workspace.');await resetLocalIndex();scope=nextScope;connected=true;await db.put('meta','lastScope',scope);job=await db.get('jobs',scope.key) || null;if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`) || null;attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;root=null;rootDetection=null;backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;sensed.at=0;applyJobOptionsToUI();update();if (!job) $('message').textContent='Connected. Choose a folder, then start the automatic export.';
 }
 async function rememberLocation(handle,role){
   if(!handle)return;for(const x of locations)if(await x.handle.isSameEntry(handle)){x.role=x.role==='backup'?'backup':role;x.at=Date.now();await db.put('meta',`localLocations:${scope.key}`,locations);return;}
@@ -237,16 +238,24 @@ function decode64(value){const s=atob(value),out=new Uint8Array(s.length);for(le
 async function attachmentLibraryReady(request=false){
   if(!attachmentLibrary)return false;let permission=await attachmentLibrary.queryPermission({mode:'read'});if(permission!=='granted' && request)permission=await attachmentLibrary.requestPermission({mode:'read'});return permission==='granted';
 }
-async function buildLocalAttachmentIndex(){
-  if(localAttachmentIndex)return localAttachmentIndex;const sources=[];
+const localFiles=new LocalIndexSession({load:async key=>{const records=await db.getPrefix('meta',`localFileRecord:${key}:`);return {records:new Map(records.map(c=>[c.key,{...c,verified:false}])),hashCache:(await db.get('meta',`localFileIndex:${key}`))?.hashCache};},save:async(key,records)=>{await db.putMany('meta',records.map(c=>({key:`localFileRecord:${key}:`+c.key,value:c,deleted:c.deleted})));await db.put('meta',`localFileIndex:${key}`,{schema:2,at:Date.now()});},onError:e=>{notice='Local index checkpoint failed: '+e.message;update();}});
+let maintenanceDirty=0,lastMaintenanceSave=0;const localWaiters=new Map();
+async function flushMaintenance(){if(maintenanceDirty&&job&&scope){await db.put('jobs',scope.key,job);maintenanceDirty=0;lastMaintenanceSave=Date.now();}}
+async function localCheckpoint(){if(running)await engine?.holdPoint?.();}
+async function resetLocalIndex(){await flushMaintenance();await localFiles.reset();localWaiters.clear();localAttachmentIndex=null;contentStore.reset();}
+async function buildLocalAttachmentIndex(rescan=false){
+  if(localAttachmentIndex&&!rescan)return localAttachmentIndex;const sources=[];
   if(root)sources.push({handle:root,source:'backup'});if(await attachmentLibraryReady(false))sources.push({handle:attachmentLibrary,source:'library'});
-  for(const x of locations)if(await x.handle.queryPermission({mode:'read'})==='granted')sources.push({handle:x.handle,source:'remembered:'+x.name});
-  const priorIndex=await db.get('meta',`localFileIndex:${scope.key}`);localAttachmentIndex=await scanLocalFileCopies(sources,scope.key,{priorIndex,onProgress:s=>{localSummary='Indexing local files · '+s.scanned+' checked · '+s.eligible+' under 10 MB · '+s.large+' manual-size files';update();}});await db.put('meta',`localFileIndex:${scope.key}`,localAttachmentIndex);
+  for(const [i,x] of locations.entries())if(await x.handle.queryPermission({mode:'read'})==='granted')sources.push({handle:x.handle,source:'remembered:'+i+':'+x.name});
+  localAttachmentIndex=await localFiles.build(sources,scope.key,{rescan,checkpoint:localCheckpoint,onProgress:s=>{localSummary='Indexing local files · '+s.scanned+' checked · '+s.eligible+' under 10 MB · '+s.large+' manual-size files';update();}});
+  localAttachmentIndex.onClassified=hash=>{const waiting=localWaiters.get(hash);if(!waiting)return;for(const file of waiting)file.retryAt=0;localWaiters.delete(hash);engine?.wake?.();};
+  const activeIndex=localAttachmentIndex;activeIndex.onVerified=(candidate,blob,hash)=>{if(localFiles.index===activeIndex&&candidate.source==='backup')contentStore.verified.set(candidate.path,{blob,hash});};
   localSummary='Local file index: '+localAttachmentIndex.scanned+' files checked · '+localAttachmentIndex.eligible+' eligible copies · '+localAttachmentIndex.large+' at/above 10 MB · '+localAttachmentIndex.invalid+' empty/error files'+(localAttachmentIndex.truncated?' · scan limit reached':'');update();return localAttachmentIndex;
 }
 async function reuseLocalAttachment(asset,basename){
   if(asset.refresh&&!validHash(asset.remoteSha256)||job.options.downloadImages===false&&isImage(asset))return null;const inventory=await buildLocalAttachmentIndex();
-  let checked=0;for(const candidate of localCopyCandidates(inventory,asset)){await engine?.holdPoint?.();if(++checked%25===0){localSummary='Checking local hashes for '+(asset.name || 'file')+' · '+checked+' candidate copies';update();await sleep(0);}const file=await verifyLocalCopy(candidate,asset,inventory,byteHash);if(!file)continue;const saved=await contentStore.save(file,asset,{source:'local-copy',maxBytes:LIBRARY_LIMIT-1});await db.put('meta',`localFileIndex:${scope.key}`,inventory);return {name:asset.name,id:asset.id,...saved,mime:file.type || asset.mime || null};}
+  let checked=0;for(const candidate of iterateLocalCopyCandidates(inventory,asset)){await localCheckpoint();if(checked++>=8){const hash=validHash(asset.remoteSha256 || asset.sha256);if(hash){let waiting=localWaiters.get(hash);if(!waiting)localWaiters.set(hash,waiting=new Set());waiting.add(asset);}return {localPending:true,status:'deferred',autoRetry:true,batchPending:true,error:null};}const file=await verifyLocalCopy(candidate,asset,inventory,byteHash);if(!file)continue;await localCheckpoint();localWaiters.get(validHash(asset.remoteSha256 || asset.sha256))?.delete(asset);const saved=await contentStore.save(file,asset,{source:'local-copy',maxBytes:LIBRARY_LIMIT-1});return {name:asset.name,id:asset.id,...saved,mime:file.type || asset.mime || null};}
+  localWaiters.get(validHash(asset.remoteSha256 || asset.sha256))?.delete(asset);
   return null;
 }
 
@@ -258,7 +267,7 @@ async function validateSavedAttachment(asset,prior){
     if(envelope){
       // Preserve evidence in a separate folder before removing the fake document.
       await write('attachment-errors/'+parts.slice(1).join('/')+'.error-response.json',file);
-      await directory.removeEntry(parts.at(-1));localAttachmentIndex=null;return null;
+      await directory.removeEntry(parts.at(-1));localFiles.remove('backup',prior.path);return null;
     }
     if(file.size===0 || file.size>ATTACHMENT_MAX_BYTES || asset.size && file.size!==Number(asset.size))return null;
     const hash=await byteHash(file);if(validHash(prior.sha256)&&hash!==prior.sha256 || validHash(asset.remoteSha256)&&hash!==asset.remoteSha256)return null;const reused=await contentStore.find(hash,{size:file.size,exclude:prior});return {...prior,...reused,name:asset.name,id:asset.id,status:'saved',imageExcluded:false,error:undefined,autoRetry:false,size:file.size,sha256:hash,validatedAt:Date.now()};
@@ -299,10 +308,10 @@ async function backupAttachments(entry,data,basename,beforeRequest,{maxTransfers
 
 async function ensureLibraryJob(){if(!connected || !scope)throw new Paused('Connect to ChatGPT first.');await folderReady(true);job ||= newJob(scope);job.options.library=true;$('library-enabled').checked=true;}
 async function fileAt(path){let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);return (await d.getFileHandle(parts.at(-1))).getFile();}
-async function byteHash(blob){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function byteHash(blob){return contentHash(blob);}
 async function verifyLibraryFile(f){
-  try{const disk=await fileAt(f.path || libraryPath(f));if(disk.size===0 || disk.size>ATTACHMENT_MAX_BYTES || f.size!=null&&disk.size!==f.size || attachmentError(await disk.slice(0,8192).text()))return false;const hash=await byteHash(disk);if(f.sha256 && hash!==f.sha256)return false;f.sha256=hash;f.size=disk.size;return true;}
-  catch(e){if(['NotFoundError','TypeMismatchError'].includes(e.name))return false;throw e;}
+  try{const {blob:disk,hash}=await contentStore.inspect(f.path || libraryPath(f));if(f.size!=null&&disk.size!==f.size)return false;if(f.sha256 && hash!==f.sha256)return false;f.sha256=hash;f.size=disk.size;return true;}
+  catch(e){if(['NotFoundError','TypeMismatchError'].includes(e.name)||/empty, too large/.test(e.message))return false;throw e;}
 }
 async function downloadLibraryFile(f,beforeRequest){
   const dest=libraryPath(f);
@@ -319,23 +328,32 @@ async function downloadLibraryFile(f,beforeRequest){
   const chunks=[];let offset=0;
   try{for(;;){await engine?.holdPoint();const part=await bridge({op:'assetChunk',key:prep.key,offset,length:384*1024});if(!part.ok)throw Error(part.error || 'Library file chunk failed.');const bytes=decode64(part.base64);if(part.next!==offset+bytes.length || !part.done&&part.next<=offset || part.next>=LIBRARY_LIMIT)throw Error('Library chunk exceeded its boundary or made no progress.');chunks.push(bytes);offset=part.next;if(part.done){if(offset!==prep.size)throw Error('Library file bytes were incomplete.');break;}}}finally{await bridge({op:'assetRelease',key:prep.key}).catch(()=>{});}
   const blob=new Blob(chunks,{type:prep.type || f.mime || 'application/octet-stream'});if(f.size!==null && blob.size!==f.size)throw Error('Library file size differs from its metadata.');if(attachmentError(await blob.slice(0,8192).text()))return {status:'unavailable',error:'Library service returned an error envelope instead of file bytes.'};
-  const saved=await contentStore.save(blob,f,{maxBytes:LIBRARY_LIMIT-1});localAttachmentIndex=null;return {...saved,mime:prep.type || f.mime,routesTried:prep.attempts || []};
+  const saved=await contentStore.save(blob,f,{maxBytes:LIBRARY_LIMIT-1});return {...saved,mime:prep.type || f.mime,routesTried:prep.attempts || []};
 }
-async function removeContent(path){let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);await d.removeEntry(parts.at(-1));}
-const contentStore=new ContentStore(()=>job,{read:fileAt,write,remove:removeContent,checkpoint:async()=>{await engine?.holdPoint?.();},commit:async()=>{await catalogWriter.report(job,root,true);await report(job);await db.put('jobs',scope.key,job);}});
+async function removeContent(path){let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);await d.removeEntry(parts.at(-1));localFiles.remove('backup',path);}
+const contentStore=new ContentStore(()=>job,{read:fileAt,write,remove:removeContent,onWrite:async(path,blob,hash,file)=>{let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);const handle=await d.getFileHandle(parts.at(-1)),disk=await handle.getFile();rememberVerifiedBlob(disk,hash);if(localFiles.index){localFiles.register({handle,path,source:'backup',name:disk.name,size:disk.size,lastModified:disk.lastModified,hash,verified:true,ids:[file.fileId,file.id].filter(Boolean)});localFiles.index.hashCache.set('backup:'+path+':'+disk.size+':'+disk.lastModified,{hash,handle});}return disk;},checkpoint:localCheckpoint,commit:async()=>{await catalogWriter.report(job,root,true);await report(job);await db.put('jobs',scope.key,job);}});
+async function maintenanceTurn(){
+  if(!job||!root||!connected||detecting||!canEdit||engine?.held||engine?.stopped||job.options.mode==='index-only')return false;
+  await engine?.holdPoint?.();const inventory=localFiles.index;let candidate;if(inventory)for(const bucket of inventory.unclassified.values()){candidate=bucket.values().next().value;if(candidate)break;}
+  const state=job.localMaintenance ||= {checked:0,linked:0,errors:[]};
+  if(candidate){state.stage='hashing';update();await verifyLocalCopy(candidate,{remoteSha256:candidate.hash,size:candidate.size},inventory,byteHash);await engine?.holdPoint?.();state.checked++;state.lastProgressAt=Date.now();state.stage='idle';}
+  else if(!await contentStore.maintenanceTurn())return false;
+  state.deferred=(inventory?.unclassifiedCount || 0)+contentStore.references().pendingPaths.size;
+  maintenanceDirty++;if(maintenanceDirty>=250||Date.now()-lastMaintenanceSave>=2000){await flushMaintenance();await engineReport(job);}update();await sleep(0);return true;
+}
 async function deduplicateFiles(){
   if(running || !canEdit || initializing)return;await ensureLibraryJob();const previous=job.status;running=true;engine={stopped:false,held:false,holdPoint:async()=>{while(engine.held&&!engine.stopped)await sleep(250);if(engine.stopped)throw new Paused('Stopped by you. Verified copies and file links are retained.');}};job.status='running';job.phase='local';job.message='Checking saved files by SHA-256 and comparing version metadata…';update();
-  try{const result=await contentStore.deduplicate();localAttachmentIndex=null;job.message=`Smart scan: ${result.checked} local files checked; ${result.linked} references linked to identical content; ${result.removed} duplicate copies removed${result.errors.length?'; '+result.errors.length+' files need inspection':''}. Distinct versions are retained.`;appendEvent(job,job.message,Date.now(),'info','library');job.status=previous==='watching'?'watching':previous || 'ready';}
+  try{const result=await contentStore.deduplicate();await localFiles.flush();job.message=`Smart scan: ${result.checked} local files checked; ${result.linked} references linked to identical content; ${result.removed} duplicate copies removed${result.errors.length?'; '+result.errors.length+' files need inspection':''}. Distinct versions are retained.`;appendEvent(job,job.message,Date.now(),'info','library');job.status=previous==='watching'?'watching':previous || 'ready';}
   catch(e){job.status='paused';job.message=e.message;throw e;}finally{job.phase=null;running=false;engine=null;await db.put('jobs',scope.key,job);await report(job);update();}
 }
 function renderLibrary(){libraryPanel?.update(job,{running,canEdit,initializing});}
 
 async function reconcileLocalAttachments(){
-  if(!job || !root)return {matched:0,checked:0};localAttachmentIndex=null;const inventory=await buildLocalAttachmentIndex();const libraryGranted=await attachmentLibraryReady(false);let matched=0,checked=0;for(const f of Object.values(job.library?.entries || {}))if(['pending','deferred'].includes(f.status)&&!f.parked){checked++;const local=await reuseLocalAttachment(f);if(local){rememberFileResult(job,f,local);matched++;}}
+  if(!job || !root)return {matched:0,checked:0};const inventory=await buildLocalAttachmentIndex();const libraryGranted=await attachmentLibraryReady(false);let matched=0,checked=0;for(const f of Object.values(job.library?.entries || {}))if(['pending','deferred'].includes(f.status)&&!f.parked){checked++;const local=await reuseLocalAttachment(f);if(local&&!local.localPending){rememberFileResult(job,f,local);matched++;}}
   for(const entry of Object.values(job.entries || {})){
     if(entry.status!=='saved')continue;const key=`${scope.key}:${entry.id}`;let cached=await db.get('chats',key);if(!cached?.data)cached=await diskRead(entry.id);if(!cached?.data)continue;
     const assets=extractAttachments(cached.data);if(!assets.length)continue;checked+=assets.length;const prior=new Map((entry.attachments || []).map(a=>[String(a.id || a.name),a])),next=[];let unresolvedAuto=false;
-    for(const asset of assets){const existing=prior.get(String(asset.id || asset.name));if(existing?.status==='saved' || existing?.status==='unverified'){const validated=await validateSavedAttachment(asset,existing);if(validated){next.push(validated);continue;}existing.status='deferred';existing.autoRetry=true;existing.error='Previously saved attachment is missing or invalid; queued for retrieval.';}const local=await reuseLocalAttachment(asset,entry.basename || entry.id);if(local){next.push(local);matched++;continue;}if(existing){next.push(existing);if(existing.autoRetry!==false && ['deferred','rate-limited'].includes(existing.status))unresolvedAuto=true;}else unresolvedAuto=true;}
+    for(const asset of assets){const existing=prior.get(String(asset.id || asset.name));if(existing?.status==='saved' || existing?.status==='unverified'){const validated=await validateSavedAttachment(asset,existing);if(validated){next.push(validated);continue;}existing.status='deferred';existing.autoRetry=true;existing.error='Previously saved attachment is missing or invalid; queued for retrieval.';}const local=await reuseLocalAttachment(asset,entry.basename || entry.id);if(local&&!local.localPending){next.push(local);matched++;continue;}if(existing){next.push(existing);if(existing.autoRetry!==false && ['deferred','rate-limited'].includes(existing.status))unresolvedAuto=true;}else unresolvedAuto=true;}
     if(next.length)entry.attachments=next;entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;entry.attachmentPending=unresolvedAuto;entry.attachmentRetryAt=0;
   }
   const source=libraryGranted?'backup + chosen and remembered files folders':'backup + remembered permitted folders';localSummary=`Local scan: ${inventory.scanned} files · ${matched} copies reused · ${inventory.large} at/above 10 MB. Unmatched files need a native-ID index with a verified hash, or an expected SHA-256; names and sizes alone do not prove identity.`;
@@ -362,8 +380,8 @@ async function start(auto=false,observed=false) {
     enterWatching(job);await db.put('jobs',scope.key,job);update();return;
   }
   if(!observed && !hasReadyWork(job) && !watchCheckDue(job) && ['complete','incomplete','indexed','watching'].includes(job.status)){if(job.status==='watching')job.status=job.lastRunStatus || 'complete';await db.put('jobs',scope.key,job);update();return;}
-  running=true;update();engine=new Engine(job,{save:j=>db.put('jobs',scope.key,j),changed:update,request:async(path,expected,lastLimitSeen)=>{try {return await bridge({op:'get',path,scope:expected,lastLimitSeen});}catch {throw new Paused('The connected ChatGPT tab closed or navigated away. Click Connect, then resume.');}},refresh:async()=>{const r=await bridge({op:'context'});if (!r.ok) throw new Paused(r.error || 'Please sign in to ChatGPT again.');},cacheGet:key=>db.get('chats',key),cachePut:(key,value)=>db.put('chats',key,value),inventory:async s=>[...await db.cacheInventory(s.key),...await diskInventory()],diskRead,sense,write,report:engineReport,index,recover,hash:hashData,attachments:backupAttachments,libraryList:(source,expected)=>bridge({op:'libraryList',source,scope:expected,lastLimitSeen:job.lastLimitSeen || 0}),libraryDownload:downloadLibraryFile,libraryVerify:verifyLibraryFile,libraryLimit:e=>{limited(job.pace,e.retryAfter);recordLimit(job);},online:()=>navigator.onLine});
-  try {await engine.run();if(opts.passive && !job.schedule.suspended && ['complete','incomplete','indexed'].includes(job.status)){enterWatching(job);await db.put('jobs',scope.key,job);await report(job);}} finally {running=false;if(job && root)await libraryReport(job);update();}
+  running=true;update();engine=new Engine(job,{save:j=>db.put('jobs',scope.key,j),changed:update,request:async(path,expected,lastLimitSeen)=>{try {return await bridge({op:'get',path,scope:expected,lastLimitSeen});}catch {throw new Paused('The connected ChatGPT tab closed or navigated away. Click Connect, then resume.');}},refresh:async()=>{const r=await bridge({op:'context'});if (!r.ok) throw new Paused(r.error || 'Please sign in to ChatGPT again.');},cacheGet:key=>db.get('chats',key),cachePut:(key,value)=>db.put('chats',key,value),inventory:async s=>[...await db.cacheInventory(s.key),...await diskInventory()],diskRead,sense,write,report:engineReport,index,recover,hash:hashData,attachments:backupAttachments,libraryList:(source,expected)=>bridge({op:'libraryList',source,scope:expected,lastLimitSeen:job.lastLimitSeen || 0}),libraryDownload:downloadLibraryFile,libraryVerify:verifyLibraryFile,maintenance:maintenanceTurn,libraryLimit:e=>{limited(job.pace,e.retryAfter);recordLimit(job);},online:()=>navigator.onLine});
+  try {await engine.run();if(opts.passive && !job.schedule.suspended && ['complete','incomplete','indexed'].includes(job.status)){enterWatching(job);await db.put('jobs',scope.key,job);await report(job);}} finally {await localFiles.flush();await flushMaintenance();running=false;if(job && root)await libraryReport(job);update();}
   }finally{starting=false;update();}
 }
 function download(blob,name) {const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
@@ -395,25 +413,25 @@ async function init() {
   bind('folder',async()=>{
     if(!scope)throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker(pickerOptions('backup')),previous=root || folder;
     beginDetection();try{
-    folder=next;root=null;rootDetection=null;backupInput=null;localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;
+    await resetLocalIndex();folder=next;root=null;rootDetection=null;backupInput=null;diskFiles=null;diskIndexEntries=null;
     await folderReady();if(job&&(!previous||!await previous.isSameEntry(root))){for(const e of Object.values(job.entries))if(e.status==='saved'){e.localPreviouslySaved=true;e.status='pending';e.retryAt=0;}for(const f of fileReferences(job))if(f.status==='saved'){f.status='pending';f.retryAt=0;}job.status='ready';}
     await detectLocalState();await buildLocalAttachmentIndex();update();
     }finally{endDetection();}
   });
   bind('attachment-library',async()=>{
-    if(!scope)throw new Paused('Connect to ChatGPT first.');attachmentLibrary=await showDirectoryPicker(pickerOptions('library'));localAttachmentIndex=null;await db.put('meta',`attachmentLibrary:${scope.key}`,attachmentLibrary);await rememberLocation(attachmentLibrary,'library');
+    if(!scope)throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker(pickerOptions('library'));await resetLocalIndex();attachmentLibrary=next;await db.put('meta',`attachmentLibrary:${scope.key}`,attachmentLibrary);await rememberLocation(attachmentLibrary,'library');
     beginDetection();try{await buildLocalAttachmentIndex();if(folder){await folderReady(false);diskFiles=null;diskIndexEntries=null;await detectLocalState();await reconcileLocalAttachments();}}finally{endDetection();}
   });
-  bind('local-rescan',async()=>{beginDetection();try{diskFiles=null;diskIndexEntries=null;localAttachmentIndex=null;if(folder)await detectLocalState();await buildLocalAttachmentIndex();if(job&&root)await reconcileLocalAttachments();}finally{endDetection();}});
+  bind('local-rescan',async()=>{beginDetection();try{diskFiles=null;diskIndexEntries=null;if(folder)await detectLocalState();await buildLocalAttachmentIndex(true);contentStore.reset();if(job&&root)await reconcileLocalAttachments();}finally{endDetection();}});
   bind('repair-attachments',async()=>{
     if(!job || !connected)throw new Paused('Connect to ChatGPT first.');await folderReady(true);
     let queued=0;for(const e of Object.values(job.entries || {}))if(repairAttachmentEntry(e,true))queued++;
-    job.options.attachments=true;$('attachments').checked=true;job.status='ready';localAttachmentIndex=null;job.attachmentRepairGeneration=(job.attachmentRepairGeneration || 0)+1;
+    job.options.attachments=true;$('attachments').checked=true;job.status='ready';await buildLocalAttachmentIndex(true);job.attachmentRepairGeneration=(job.attachmentRepairGeneration || 0)+1;
     job.message=`Attachment repair queued for ${queued} chats using saved JSON. Valid files are reused; error responses are preserved under attachment-errors before retrying.`;
     job.events ||= [];job.events.push({at:Date.now(),message:job.message});job.events=job.events.slice(-1500);
     await db.put('jobs',scope.key,job);await report(job);update();await start();
   });
-  bind('start',()=>start());bind('hold',async()=>{if(!running || !engine)return;engine.held=!engine.held;job.status=engine.held?'held':'running';job.message=engine.held?'Held in place. The live worker, queue position, discovery cursors, and connection stay open; no new network work starts until you resume.':'Resuming the same live run exactly where it was held.';job.events ||= [];job.events.push({at:Date.now(),message:job.message});job.events=job.events.slice(-1500);await db.put('jobs',scope.key,job);update();});bind('pause',async()=>{if(job?.schedule)job.schedule.suspended=true;if(!running && job){job.status='paused';job.message='Passive watch stopped. Queue, saved files and discovery cursors are retained. Press Start to resume watching.';Object.assign(job.awareness ||= {},{state:'paused',reason:job.message,waitUntil:0});await db.put('jobs',scope.key,job);update();return;}if(engine){engine.stopped=true;job.status='pausing';job.message='Stopping the active run after the current request / disk write…';await db.put('jobs',scope.key,job);update();}});
+  bind('start',()=>start());bind('hold',async()=>{if(!running || !engine)return;engine.held=!engine.held;await localFiles.flush();job.status=engine.held?'held':'running';job.message=engine.held?'Held in place. The live worker, queue position, discovery cursors, and connection stay open; no new network work starts until you resume.':'Resuming the same live run exactly where it was held.';job.events ||= [];job.events.push({at:Date.now(),message:job.message});job.events=job.events.slice(-1500);await db.put('jobs',scope.key,job);update();});bind('pause',async()=>{if(job?.schedule)job.schedule.suspended=true;if(!running && job){job.status='paused';job.message='Passive watch stopped. Queue, saved files and discovery cursors are retained. Press Start to resume watching.';Object.assign(job.awareness ||= {},{state:'paused',reason:job.message,waitUntil:0});await db.put('jobs',scope.key,job);update();return;}if(engine){engine.stopped=true;await localFiles.flush();job.status='pausing';job.message='Stopping the active run after the current request / disk write…';await db.put('jobs',scope.key,job);update();}});
   bind('retry',async()=>{if (!job) return;const now=Date.now();let parked=0,requeued=0;if(job.discoveryUncertain){job.sources=newJob(scope,job.options).sources;job.discoveryAudit={round:0,baseline:Object.keys(job.entries || {}).length,stable:false};job.discoveryUncertain=false;}for (const e of Object.values(job.entries)){if(e.status==='failed'){if((e.brokenUntil || 0)>now){parked++;}else{e.status='pending';e.attempts=0;e.retryAt=0;e.recoveryAttempted=false;e.brokenUntil=0;requeued++;}}if(e.attachmentPending){e.attachmentRetryAt=0;e.attachmentScannedAt=0;}}for (const s of job.sources) if(s.error){s.error=null;s.done=false;s.seenPages=[];s.uniqueIds=[];s.emptyChecks=0;s.failures=0;s.reportedTotal=0;if(s.kind==='list')s.offset=0;else s.cursor=s.kind==='project'?'0':null;}job.status='ready';job.message=`Requeued ${requeued} unresolved chat${requeued===1?'':'s'}; ${parked} hard failure${parked===1?'':'s'} checked within the last 7 days stayed parked. Transient attachment retries were reopened; hard attachment failures stay retired.`;await db.put('jobs',scope.key,job);await start();});
   bind('scan',async()=>{if (!job) return;resetSourcesForScan();await db.put('jobs',scope.key,job);await start();});
   bind('add',async()=>{if(!scope) throw new Paused('Connect first.');if(!job) job=newJob(scope,{archived:$('archived').checked,projects:$('projects').checked,assist:$('assist').checked,verify:$('verify').checked,attachments:$('attachments').checked,passive:$('passive').checked,passiveHours:Number($('passive-hours').value)||3});addIds();job.status='ready';job.message='Added links to the queue. Click Start / resume.';await db.put('jobs',scope.key,job);update();});

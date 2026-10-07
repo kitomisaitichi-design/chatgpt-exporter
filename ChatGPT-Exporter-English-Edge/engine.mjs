@@ -15,7 +15,7 @@ export class Engine {
   async holdPoint(){while(this.held){if(this.stopped)throw new Paused('Paused by you.');await this.sleep(400);}if(this.stopped)throw new Paused('Paused by you.');}
   event(message,level,category) {appendEvent(this.job,message,this.now(),level,category);}
   wake(){this.wakeRevision++;}
-  async wait(until, label) {const revision=this.wakeRevision;while (this.now()<until&&revision===this.wakeRevision) {await this.holdPoint();this.job.message=label;this.io.changed?.(this.job);await this.sleep(Math.min(1000,until-this.now()));}await this.holdPoint();}
+  async wait(until, label) {const revision=this.wakeRevision;while (this.now()<until&&revision===this.wakeRevision) {await this.holdPoint();await this.io.maintenance?.();this.job.message=label;this.io.changed?.(this.job);await this.sleep(Math.min(1000,Math.max(0,until-this.now())));}await this.holdPoint();}
   async observe() {
     if(!this.io.sense)return [];
     const snapshots=await this.io.sense(this.job.scope);let changed=queueFullScanIfDue(this.job,this.now());
@@ -222,8 +222,10 @@ export class Engine {
             if(!await this.io.libraryVerify(verify)){verify.status=verify.historical?'unavailable':'pending';verify.path=null;verify.retryAt=0;this.event(`Library saved copy needs repair: ${verify.name}.`,'warn','library');await this.save();}
           }
           if(decision.lane!=='library')finishWork(this.job,decision.lane,{savedFile:decision.lane==='attachment'&&this.attachmentTurnSaved,urgent:urgentReady===ready&&!!ready,local:!!localReady,now:this.now()});
+          if((this.job.workScheduler?.completed || 0)%10===0){await this.holdPoint();await this.io.maintenance?.();}
           continue;
         }
+        if(await this.io.maintenance?.())continue;
         const fileLookup=createFileLookup(this.job);
         const libraryWaits=!indexOnly&&this.job.options.library?[...fileReferences(this.job).filter(f=>!f.historical&&!f.external&&!f.parked&&['pending','deferred'].includes(f.status)&&(f.attempts || 0)<2&&!sharedFileBudget(this.job,f,fileLookup).parked&&(f.sourceKind!=='chat'||this.job.options.attachments!==false)).map(f=>f.retryAt),...(this.job.library?.sources || []).filter(s=>s.error&&s.failures<3).map(s=>s.retryAt)]:[];
         const waits=[...(indexOnly?[]:pending.map(e=>e.retryAt)),...(this.job.options.verify!==false?this.job.sources.filter(s=>s.error&&(s.failures || 0)<=2).map(s=>s.retryAt):[]),...libraryWaits].filter(t=>t>this.now());if (waits.length) {await this.wait(Math.min(...waits),'Waiting to revisit unresolved work after a quiet period…');continue;}

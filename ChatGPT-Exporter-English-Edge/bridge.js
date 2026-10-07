@@ -1,6 +1,6 @@
 // Same-origin/read-only ChatGPT bridge. Authentication remains inside ChatGPT.
 (() => {
-  if (window.__englishExporterBridgeV2410) return;
+  if (window.__englishExporterBridgeV2411) return;
   const originalFetch = window.fetch.bind(window);
   const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map(), changedChats=new Map(), libraryItems=new Map(),libraryRoutes=new Map();
   const documentId=crypto.randomUUID(), loadedAt=Date.now();
@@ -159,15 +159,16 @@
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV2410',{value:{rpc,version:'2.4.8'}, configurable:false,writable:false});
-  if(!window.__englishExporterBridgeV249)Object.defineProperty(window,'__englishExporterBridgeV249',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV248)Object.defineProperty(window,'__englishExporterBridgeV248',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV247)Object.defineProperty(window,'__englishExporterBridgeV247',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV246)Object.defineProperty(window,'__englishExporterBridgeV246',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV245)Object.defineProperty(window,'__englishExporterBridgeV245',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV244)Object.defineProperty(window,'__englishExporterBridgeV244',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV243)Object.defineProperty(window,'__englishExporterBridgeV243',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV242)Object.defineProperty(window,'__englishExporterBridgeV242',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV2410});
-  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV2410});
+  Object.defineProperty(window,'__englishExporterBridgeV2411',{value:{rpc,version:'2.4.11'}, configurable:false,writable:false});
+  if(!window.__englishExporterBridgeV2410)Object.defineProperty(window,'__englishExporterBridgeV2410',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV249)Object.defineProperty(window,'__englishExporterBridgeV249',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV248)Object.defineProperty(window,'__englishExporterBridgeV248',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV247)Object.defineProperty(window,'__englishExporterBridgeV247',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV246)Object.defineProperty(window,'__englishExporterBridgeV246',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV245)Object.defineProperty(window,'__englishExporterBridgeV245',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV244)Object.defineProperty(window,'__englishExporterBridgeV244',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV243)Object.defineProperty(window,'__englishExporterBridgeV243',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV242)Object.defineProperty(window,'__englishExporterBridgeV242',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV240)Object.defineProperty(window,'__englishExporterBridgeV240',{value:window.__englishExporterBridgeV2411});
+  if(!window.__englishExporterBridgeV238)Object.defineProperty(window,'__englishExporterBridgeV238',{value:window.__englishExporterBridgeV2411});
 })();

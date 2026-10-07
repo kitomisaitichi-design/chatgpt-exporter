@@ -1,12 +1,12 @@
 # ChatGPT Exporter — English Autopilot for Microsoft Edge
 
-**Version 2.4.10 · October 6, 2026**
+**Version 2.4.11 · October 7, 2026**
 
 Build a local backup of the conversations available to your signed-in ChatGPT web session. The extension discovers active, archived and project chats, writes conversation JSON and readable Markdown, tracks revisions, and backs up eligible attachments. Your backup stays in the folder you select.
 
-[Download v2.4.10](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.10) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
+[Download v2.4.11](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.11) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-**Viewer compatibility:** Exporter **2.4.10 remains interoperable with [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)**, including the new shared-content file layout. The current release is **1.1.7**; the download link follows the latest release. Select the complete backup root in the Viewer and open **Files & Library**.
+**Viewer compatibility:** Exporter **2.4.11 remains interoperable with [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)**, including the new shared-content file layout. The current release is **1.1.10** (checked October 7, 2026); the download link follows the latest release. Select the complete backup root in the Viewer and open **Files & Library**.
 
 ## Functionality at a glance
 
@@ -17,10 +17,10 @@ Build a local backup of the conversations available to your signed-in ChatGPT we
 | Passive watching | Completed-reply and body-change detection, recent metadata checks, fixed full-scan deadlines, adaptive quiet intervals, persisted schedule, watcher health, Stop/Start and reload recovery while Edge/dashboard/ChatGPT stay open. |
 | File downloads | Uploaded and generated files exposed by ChatGPT; chat attachments and owned Library folders; linked native IDs, bounded route fallbacks, checked byte sizes, error-envelope rejection, and chunked Stop/hold support. |
 | Size and images | New automatic transfers strictly under decimal 10 MB; searchable manual lists for larger, connected or unavailable files; persisted image download toggle for both sources. |
-| Deduplication and versions | SHA-256 content sharing across names/IDs, identity reuse before downloading, Deduplicate & smart scan, safe redundant-copy removal, numbered-copy families, date/revision evidence, size-only review suggestions, and retention of distinct content. |
+| Deduplication and versions | SHA-256 content sharing across names/IDs, identity reuse before downloading, automatic bounded background linking, manual Deduplicate & smart scan for redundant-copy removal, numbered-copy families, date/revision evidence, size-only review suggestions, and retention of distinct content. |
 | Independent source history | Separate chat/Library presence, retained chat-only files, unavailable-chat records, missing Library items after complete scans, earlier verified versions, source names/links, and source filters. Missing references never remove saved copies. |
 | Download memory | Two failed file transfers shared by linked references, persistent parking, per-file or grouped explicit Retry, and no failure charge for server cooldowns or Stop. |
-| Viewer integration | Current Offline Chat Viewer 1.1.7; versioned relative-path catalogs, shared files and retained history, source-chat navigation, chat Files/text previews, and manual downloaded-copy import. Latest Viewer download link stays current. |
+| Viewer integration | Current Offline Chat Viewer 1.1.10; versioned relative-path catalogs, shared files and retained history, source-chat navigation, chat Files/text previews, and manual downloaded-copy import. Latest Viewer download link stays current. |
 | Controls and activity | Connect/folder readiness, Start/Stop, Hold/Resume, fair queue turns, active work/reason/growth/stall display, cached dashboard rendering, live six-minute activity toggle/countdown, file status cards, list/grid, search/sort/page sizes, full pagination, detailed routes, and log search/level/category/pause/follow/reset/copy/TXT/JSON controls. |
 | Recovery and portability | Same-folder queue/cache upgrades, account/workspace checks, disk-index reconciliation, portable-state import/export, cached transcript ZIP, adaptive pacing, offline waits, incomplete discovery repair and optional one-shot difficult-chat recovery. |
 | Local storage | Selected backup root, optional permitted existing-file folder, JSON/Markdown/binaries/catalogs/reports/portable checkpoints; no developer API key or external export service required. |
@@ -75,6 +75,14 @@ The overview shows **what is running and why**, queued chats/attachment passes, 
 
 Jobs checkpoint to IndexedDB after each operation. Full reports, catalogs and portable JSON batch at a 15-second target while running and flush on completion/pause or explicit actions. Keep the dashboard open; a hard crash may leave those exported snapshots briefly behind the durable local queue. Safe deduplication still publishes its changed references before deleting verified duplicates.
 
+## What changed in v2.4.11
+
+**One local index, incremental updates, bounded background linking.** Same-size candidates are hashed/classified once, then found by shared hash/native-ID/path lookups. Downloads no longer discard the index. Internal records batch in groups of at most 250 or every two seconds. Rescan preserves unchanged session fingerprints; reopening verifies persisted hints before reuse.
+
+One maintenance file runs after ten productive operations or during idle/network waits. Hold/Stop suspend it, and local-search waiting spends no transfer-failure attempts. The local detection panel shows hashing/linking, deferred work and last progress. Automatic linking keeps physical copies; **Deduplicate & smart scan** performs manual cleanup with a recovery journal and fresh byte verification. Names, size, dates and sampled fingerprints never prove equality. Without a reported hash or trusted native-ID association, the first remote transfer can still be necessary.
+
+173 regressions and isolated Edge workflows pass; the reverse-order same-size fixture takes **199/399 opens for 100/200 files** and one full hash per file. The 10,000-file UI retains focus and expanded details. Full Viewer 1.1.10 import and live account resume were not rerun. [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.11.md).
+
 ## What changed in v2.4.10
 
 **Both folder controls recover existing chats.** Existing files folder and remembered permitted locations now contribute JSON transcripts as well as binary files. A chat stored only there can be copied locally into your backup. New queue IDs invalidate the in-memory search, while persisted fingerprints avoid parsing unchanged files again. All 2.4.9 recovery safeguards remain.
@@ -97,7 +105,7 @@ To apply: reload the existing extension card in `edge://extensions`, refresh Cha
 
 Selecting an existing backup reuses its root instead of creating another backup inside it. Selecting a parent finds matching renamed/nested backups. Recursive transcript detection reads JSON contents, supports nested canonical JSON and official conversation arrays, and credits validated local bodies before Start. Other layouts queue local rewrites into the normal JSON/Markdown layout; source files remain intact. Matching portable state and indexes restore missing metadata without overwriting newer live failures or cursors.
 
-**Local detection & search** shows found bodies, index-only links, local rewrite work, browser-cache bodies, eligible file copies, large files and scan limits. **Rescan local folders** rebuilds the index. The shared picker shortcut opens **Downloads, Documents, Desktop or the last location**. Up to eight selected locations and a file-search index are remembered per workspace. Only currently permitted handles are searched; the browser still requires a picker/grant for a new location. Selecting a subfolder cannot grant its parent or siblings automatically.
+**Local detection & search** shows found bodies, index-only links, local rewrite work, browser-cache bodies, eligible file copies, large files and scan limits. **Rescan local folders** checks directory metadata and retains unchanged session fingerprints. Downloads add records directly to the live index. The shared picker shortcut opens **Downloads, Documents, Desktop or the last location**. Up to eight selected locations and a file-search index are remembered per workspace. Only currently permitted handles are searched; the browser still requires a picker/grant for a new location. Selecting a subfolder cannot grant its parent or siblings automatically.
 
 Local retrieval uses prior conversation/Library indexes (including nested ones), native file IDs, content-addressed paths, normalized names and verified SHA-256. An expected hash also searches same-size candidates under different names. Copies are verified before reuse; a filename/size match alone never credits a file. Pending chat and Library files share this local search. Files at/above 10 MB are counted for manual handling, image choices and parked failures remain respected. The index stores handles/metadata locally; it is excluded from exported backup state.
 
@@ -134,7 +142,7 @@ Upgrade in the **same folder** to retain the queue and cache. Existing source re
 
 ## Install in Edge
 
-1. Download **ChatGPT-Exporter-English-Edge-v2.4.10.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
+1. Download **ChatGPT-Exporter-English-Edge-v2.4.11.zip** from the release page. The separate `.sha256.txt` asset contains its SHA-256 checksum.
 2. Extract the ZIP to a permanent folder. Inside it, find `ChatGPT-Exporter-English-Edge`, which contains `manifest.json`.
 3. Open `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
 4. Open the exporter dashboard from the extension. Connect to the intended signed-in ChatGPT account and workspace.
@@ -217,7 +225,7 @@ New binaries use `attachments/content/<sha256>/<first-name>`, so different conte
 
 Point your **kitomisaitichi-design/chatgpt-viewer** at the complete backup folder, keeping `conversation-index.json`, `json/`, `markdown/` and `attachments/` together. Existing native conversation JSON, branches, IDs, timestamps, classifications and basenames keep their format. The conversation index attaches Library files where a source conversation ID is available. Unlinked Library files stay in the file catalog; they are not invented conversations.
 
-Exporter 2.4.10 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. Hash-alias, version-evidence, image-preference, native-file-ID and independent source-reference fields are additive. Historical versions have separate catalog identities so Viewer retains distinct bytes. Viewer 1.1.6 retains the file catalog reader and uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<first-name>` shared copies.
+Exporter 2.4.11 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. Hash-alias, version-evidence, image-preference, native-file-ID and independent source-reference fields are additive. Historical versions have separate catalog identities so Viewer retains distinct bytes. Viewer 1.1.6 retains the file catalog reader and uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<first-name>` shared copies.
 
 | Exporter feature | Viewer behavior |
 | --- | --- |
@@ -249,10 +257,11 @@ All **144 exporter regression tests** pass, including duplicate equality, native
 
 ## Complete version history
 
-This lists **every published GitHub release** plus the earlier development builds documented in this repository. Each row links to the detailed notes or the complete code comparison. Older Viewer numbers and download policies in archived notes describe those versions; current interoperability is tested with **Viewer 1.1.6**.
+This lists **every published GitHub release** plus the earlier development builds documented in this repository. Each row links to the detailed notes or the complete code comparison. Older Viewer numbers and download policies in archived notes describe those versions; historical full-import interoperability was tested with **Viewer 1.1.6**. The current Viewer release is **1.1.10**; its full import was not rerun for this exporter patch.
 
 | Version | Changes introduced | Release and detailed history |
 | --- | --- | --- |
+| **2.4.11** | Incremental shared file index; linear candidate classification; batched internal records; bounded background linking; manual cleanup retained; Hold/Stop and deferred-search controls. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.11) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.11.md) |
 | **2.4.10** | Both folder controls recover transcript JSON; remembered file locations join chat search; new queue IDs trigger indexed local lookup before download. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.10) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.10.md) |
 | **2.4.9** | Stop local timestamps from forcing downloads; recover nested same-user backup bodies for known IDs; persist validated transcript scan fingerprints; skip overlap; single-worker Start. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.9) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.9.md) |
 | **2.4.8** | Detect existing/nested backup roots; recursive JSON-content recovery; browser-cache and matching metadata restoration; remembered permitted locations/search index; Documents/Downloads/Desktop shortcuts; renamed/native-ID/hash local retrieval; visible scan results and rescan. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.8) · [Full notes](ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.8.md) |

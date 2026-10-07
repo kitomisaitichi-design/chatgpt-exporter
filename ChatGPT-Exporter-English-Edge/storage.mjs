@@ -15,6 +15,9 @@ export async function put(store, key, value) {
   const db = await ready;
   return new Promise((resolve, reject) => {const tx = db.transaction(store, 'readwrite');tx.objectStore(store).put(value, key);tx.oncomplete = () => resolve();tx.onabort = tx.onerror = () => reject(tx.error || new Error('Local save failed'));});
 }
+// Internal index rows share the existing database; a batch commits atomically.
+export async function putMany(store,rows){const db=await ready;return new Promise((resolve,reject)=>{const tx=db.transaction(store,'readwrite'),s=tx.objectStore(store);for(const {key,value,deleted} of rows)deleted?s.delete(key):s.put(value,key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(tx.error || Error('Local index checkpoint failed.'));});}
+export async function getPrefix(store,prefix){const db=await ready;return new Promise((resolve,reject)=>{const rows=[],tx=db.transaction(store),r=tx.objectStore(store).openCursor(IDBKeyRange.bound(prefix,prefix+'\uffff'));r.onsuccess=()=>{const c=r.result;if(!c)return resolve(rows);rows.push(c.value);c.continue();};r.onerror=()=>reject(r.error);});}
 export async function cacheInventory(scopeKey) {
   const db=await ready,prefix=scopeKey+':';
   return new Promise((resolve,reject)=>{

@@ -1,0 +1,15 @@
+# ChatGPT Exporter 2.4.11
+
+Local file matching now retains one shared index per connected scope/folder selection. Downloads register new files directly; changed or removed records invalidate individually. Concurrent callers share one initial scan. Explicit Rescan checks metadata and keeps unchanged session fingerprints. Persisted hashes remain hints and require actual verification after reopening.
+
+SHA-256, native-ID and path lookups are shared across local matching and ContentStore. Each unchanged candidate is classified once into its actual hash; size searches consume the remaining unclassified bucket instead of restarting. Verified blobs share their hashing result through saving. Internal versioned records checkpoint in batches of at most 250 or after two seconds, plus Stop/folder transitions; the database identity and exported catalog schemas stay unchanged.
+
+Background maintenance processes one file per turn after ten foreground operations, or while idle/waiting for network conditions. Hashing is serialized; metadata reads are sequential (below the two-read ceiling), with UI yields after an eight-millisecond processing budget. Hold and Stop suspend maintenance. Local searches yield after eight candidates without spending file-download failure attempts; matching hash results wake waiting references. Separate status shows indexing, hashing/linking, deferred work and last progress.
+
+Automatic linking keeps physical copies. Deduplicate & smart scan remains the explicit manual cleanup action; it journals references before removal and freshly checks both copies. External originals are never removed. Native-ID association hashes remain separate from actual hashes so corruption cannot become a trusted association on a later pass. Distinct versions, source history, image preferences and two-failure parking are preserved.
+
+Validation: 173 regression tests; the same-size reverse-order fixture uses 199 opens/100 hashes for 100 files and 399 opens/200 hashes for 200, versus the previous 5,050/20,100 opens. Isolated Edge covers both folder controls, empty input, double Start, refresh/new IDs, Library paging/failure memory, 10,000 files, Hold/Stop and manual cleanup. The incremental download fixture checks one recursive scan for two consecutive transfers. These are synthetic browser checks; a live private account resume and full Viewer 1.1.10 import were not rerun.
+
+Viewer interoperability retains chatgpt-conversation-index/v1, chatgpt-library-index/v1 and chatgpt-exporter-viewer/v1. Current Viewer: 1.1.10; the README links to its latest release. Within a running session, same-handle/path/size/mtime fingerprints avoid repeat hashing. An external edit that deliberately preserves those stats needs a fresh hash check; manual cleanup always rehashes both copies. No dependencies added.
+
+Reload the existing extension at edge://extensions, refresh ChatGPT, reconnect, choose your existing backup, Rescan local folders once and Resume. Keep both old and nested backup folders. No reset or deletion is needed.
