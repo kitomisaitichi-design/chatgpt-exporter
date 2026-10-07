@@ -1,4 +1,4 @@
-export const VERSION = '2.4.12';
+export const VERSION = '2.4.13';
 // Persisted chat attachments can legitimately lack a native file ID or label.
 export const compareText = (a,b) => String(a ?? '').localeCompare(String(b ?? ''));
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;

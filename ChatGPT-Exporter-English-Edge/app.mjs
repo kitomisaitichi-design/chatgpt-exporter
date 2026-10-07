@@ -181,7 +181,7 @@ function pickerOptions(role){const options={mode:role==='backup'?'readwrite':'re
 async function folderReady(request=false) {
   if (!folder) throw new Paused('Choose a backup folder first.');if(!scope)throw new Paused('Connect to ChatGPT first.');
   let permission=await folder.queryPermission({mode:'readwrite'});if(permission!=='granted'&&request)permission=await folder.requestPermission({mode:'readwrite'});if(permission!=='granted')throw new Paused('Folder permission is needed. Click Choose folder to grant access again.');
-  if(root)return;localSummary='Detecting the selected folder and matching nested backups…';update();
+  if(root&&rootDetection)return;localSummary='Detecting the selected folder and matching nested backups…';update();
   const picked=folder,resolved=await resolveBackupFolder(picked,scope.key,{onProgress:s=>{localSummary='Looking for the matching backup · '+s.directories+' folders checked';update();}});
   root=resolved.root;rootDetection=resolved;folder=root;backupInput=await picked.isSameEntry(root)?backupInput:picked;await db.put('meta',`folder:${scope.key}`,folder);if(backupInput)await db.put('meta',`backupInput:${scope.key}`,backupInput);await rememberLocation(picked,'backup');await rememberLocation(root,'backup');
 }
