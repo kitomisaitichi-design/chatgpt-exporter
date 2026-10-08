@@ -1,3 +1,4 @@
+import {availableLocalFile,sameLocalEntry} from './local-io.mjs';
 import {validId,conversationValid,epoch,safeName,conversationTime} from './core.mjs';
 
 const missing=e=>['NotFoundError','TypeMismatchError'].includes(e.name);
@@ -48,13 +49,13 @@ export async function resolveBackupFolder(selected,key,{maxDepth=4,maxDirectorie
 }
 export async function* walkLocalFiles(start,{maxDepth=12,maxFiles=50000,maxDirectories=5000,exclude=()=>false,acceptDirectory=async()=>true,stats={},onProgress=()=>{}}={}){
   Object.assign(stats,{files:0,directories:0,truncated:false,errors:0});const queue=[{dir:start,path:'',depth:0}];
-  while(queue.length){const {dir,path,depth}=queue.shift();if(++stats.directories>maxDirectories){stats.truncated=true;break;}if(!await acceptDirectory(dir,path))continue;let tick=0;
-    try{for await(const [name,handle] of dir.entries()){
+  while(queue.length){const {dir,path,depth}=queue.shift();if(++stats.directories>maxDirectories){stats.truncated=true;break;}let tick=0;
+    try{if(!await acceptDirectory(dir,path))continue;for await(const [name,handle] of dir.entries()){
       if(exclude(name,handle,path,depth))continue;const relative=path+name;
       if(handle.kind==='directory'){if(depth>=maxDepth){stats.truncated=true;continue;}queue.push({dir:handle,path:relative+'/',depth:depth+1});}
       else {if(stats.files>=maxFiles){stats.truncated=true;return;}stats.files++;yield {name,handle,path:relative,dir,prefix:path};}
       if(++tick%100===0){onProgress({...stats});await yieldUI();}
-    }}catch(e){if(['NotAllowedError','SecurityError'].includes(e.name))throw e;stats.errors++;}
+    }}catch(e){if(!missing(e))throw e;stats.errors++;}
     onProgress({...stats});await yieldUI();
   }
 }
@@ -64,13 +65,13 @@ export async function scanTranscriptInventory(root,key,{onProgress=()=>{},maxFil
   const metadata=new Map((m.index?.scope===key || canImport(m)?m.index?.entries || []:[]).filter(e=>validId(e.id)&&(!m.foreign||knownIds.has(e.id))).map(e=>[e.id,e])),byPath=new Map([...metadata.values()].filter(e=>safePath(e.json)).map(e=>[e.json,e])),files=new Map(),entries=new Map(),stats={},contexts=new Map([['',m]]),nextCache=new Map();
   for(const e of metadata.values())entries.set(e.id,{id:e.id,title:e.title,update_time:e.update_time,create_time:e.create_time,checkedUpdateTime:e.checked_update_time,contentHash:e.content_hash || null,basename:safePath(e.json)&&e.json.startsWith('json/')?e.json.slice(5,-5):null,indexStatus:e.status || 'pending',attachments:e.attachments || [],attachmentStateRevision:e.attachment_state_revision || 0,attachmentScannedAt:e.attachment_scanned_at || 0,attachmentPending:!!e.attachment_pending,origin:'existing conversation index'});
   let valid=0,invalid=0,tooLarge=0,rewrites=0,reused=0;const knownKey=knownIds?await hashData([...knownIds].sort())||[...knownIds].sort().join('|'):null;
-  for await(const item of walkLocalFiles(root,{maxFiles,maxDepth,stats,onProgress,acceptDirectory:async(dir,path)=>{if(!path)return true;for(const h of excludeRoots)if(dir===h || dir.isSameEntry&&await dir.isSameEntry(h))return false;const own=await marker(dir,key),parent=contexts.get(path.slice(0,path.slice(0,-1).lastIndexOf('/')+1))||m,current=own.recognized?own:parent;contexts.set(path,current);return !current.foreign||!!canImport(current);},exclude:(name,h)=>h.kind==='directory'&&['attachments','markdown','attachment-errors','.git','node_modules'].includes(name)})){
+  for await(const item of walkLocalFiles(root,{maxFiles,maxDepth,stats,onProgress,acceptDirectory:async(dir,path)=>{if(!path)return true;for(const h of excludeRoots)if(await sameLocalEntry(dir,h))return false;const own=await marker(dir,key),parent=contexts.get(path.slice(0,path.slice(0,-1).lastIndexOf('/')+1))||m,current=own.recognized?own:parent;contexts.set(path,current);return !current.foreign||!!canImport(current);},exclude:(name,h)=>h.kind==='directory'&&['attachments','markdown','attachment-errors','.git','node_modules'].includes(name)})){
     if(!/\.json$/i.test(item.name)||['conversation-index.json','portable-state.json','export-report.json','viewer-handoff.json'].includes(item.name))continue;
-    const blob=await item.handle.getFile();if(blob.size>64*1024*1024){tooLarge++;continue;}
+    const blob=await availableLocalFile(item.handle,stats);if(!blob)continue;if(blob.size>64*1024*1024){tooLarge++;continue;}
     const prior=cache.get(item.path),context=contexts.get(item.prefix)||m;
     const insert=f=>{if(context.foreign&&!knownIds?.has(f.entry.id))return;const old=files.get(f.entry.id);if(old&&old.score>=f.score)return;const copy={...f,entry:{...f.entry}};files.set(f.entry.id,copy);entries.set(f.entry.id,copy.entry);};
     const filterKey=context.foreign?knownKey:null;
-    if(prior&&prior.filterKey===filterKey&&prior.size===blob.size&&prior.lastModified===blob.lastModified&&item.handle.isSameEntry&&await item.handle.isSameEntry(prior.handle)){
+    if(prior&&prior.filterKey===filterKey&&prior.size===blob.size&&prior.lastModified===blob.lastModified&&await sameLocalEntry(item.handle,prior.handle)){
       const records=prior.records.map(r=>{const saved=metadata.get(r.entry.id);return {...r,entry:{...r.entry,checkedUpdateTime:saved?saved.content_hash===r.entry.contentHash?saved.checked_update_time:null:r.entry.checkedUpdateTime}};});for(const r of records)insert({...r,handle:item.handle});nextCache.set(item.path,{...prior,handle:item.handle,records});reused++;continue;
     }
     let parsed;try{parsed=JSON.parse(await blob.text());}catch{invalid++;continue;}const records=[];

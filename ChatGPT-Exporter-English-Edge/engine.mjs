@@ -1,3 +1,4 @@
+import {localStorageFailure} from './local-io.mjs';
 import {seedFileSources,observeFileSource,observeChatFiles,fileReferences,sharedFileBudget,markChatSourceUnavailable,createFileLookup} from './file-links.mjs';
 import {pickWork,beginWork,finishWork,assetsMustYield,schedulerState,libraryPolicy} from './work-scheduler.mjs';
 import {libraryState,queueLibraryScan,libraryWork,processLibrary,mergeLibraryItem,normalizeLibraryItem} from './library.mjs';
@@ -156,7 +157,7 @@ export class Engine {
       const attachments=await this.io.attachments(entry,cached.data,entry.basename || entry.id,async()=>{await this.observe();if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');if(await this.paceRequest('asset')===false)throw new Paused('A read check is required before attachment recovery.');if(urgent())throw new YieldAttachments('Attachment work yielded to queued chat updates.');},{maxTransfers:1,maxItems:25});
       if(attachments.length)entry.attachments=attachments;this.attachmentTurnSaved=attachments.some(f=>f.status==='saved'&&!savedBefore.has(`${f.id}:${f.path}:${f.sha256}`));entry.attachmentStateRevision=ATTACHMENT_STATE_REVISION;const retryable=attachments.filter(a=>a.status==='rate-limited' || a.status==='deferred');entry.attachmentPending=retryable.length>0;entry.attachmentRetryAt=entry.attachmentPending?this.now()+(attachments.some(a=>a.batchPending)?0:attachments.some(a=>a.yielded)?60000:attachments.some(a=>a.status==='rate-limited')?120000:6*3600000):0;entry.attachmentScannedAt=this.now();
       if(attachments.length){const local=attachments.filter(a=>a.status==='saved' && a.source!=='network').length,network=attachments.filter(a=>a.status==='saved' && a.source==='network').length,unavailable=attachments.filter(a=>['unavailable','permission-unavailable'].includes(a.status)).length,large=attachments.filter(a=>a.status==='skipped-too-large').length,deferred=retryable.length;if(network){const before=this.job.pace.tier || 0;for(let i=0;i<network;i++){succeeded(this.job.pace,this.now());recordSuccess(this.job,this.now());}if((this.job.pace.tier || 0)<before)this.event(`Successful attachment reads stepped pacing down to tier ${this.job.pace.tier}.`);}this.event(`Attachment pass: ${entry.title} — ${local} local, ${network} downloaded, ${unavailable} unavailable${large?`, ${large} too large`:''}${deferred?`, ${deferred} retryable`:''}.`);}else this.event(`Attachment pass: ${entry.title} — no eligible files.`);
-    } catch(e){if(e instanceof Paused || ['NotAllowedError','SecurityError','QuotaExceededError'].includes(e.name))throw e;entry.attachmentPending=true;entry.attachmentRetryAt=this.now()+6*3600000;entry.attachmentScannedAt=this.now();this.event(`Attachment pass transiently deferred: ${entry.title} — ${e.message || e}`);}
+    } catch(e){if(e instanceof Paused || localStorageFailure(e))throw e;entry.attachmentPending=true;entry.attachmentRetryAt=this.now()+6*3600000;entry.attachmentScannedAt=this.now();this.event(`Attachment pass transiently deferred: ${entry.title} — ${e.message || e}`);}
     entry.attachmentLastTurnAt=this.now();this.job.phase=null;await this.save();await this.io.report(this.job);
   }
   async discover(source) {
@@ -206,7 +207,7 @@ export class Engine {
           this.io.changed?.(this.job);
           if(decision.lane==='chat'){
             try{await this.process(ready);}catch(error){
-              if(error instanceof Paused || ['NotAllowedError','SecurityError','QuotaExceededError'].includes(error.name))throw error;
+              if(error instanceof Paused || localStorageFailure(error))throw error;
               ready.attempts=(ready.attempts || 0)+1;ready.status=ready.attempts>=3?'failed':'pending';ready.retryAt=ready.status==='pending'?this.now()+60000*ready.attempts:0;ready.error=error.message || String(error);this.job.phase=null;
               this.event(`File work ${ready.status==='failed'?'needs attention':'deferred'}: ${ready.title} — ${ready.error}. Continuing other chats.`);await this.save();
             }
@@ -236,9 +237,9 @@ export class Engine {
         this.job.message=this.job.status==='indexed' ? `${c.total} links indexed on disk. ${c.pending} chats remain to download.` : this.job.status==='complete' ? `Finished: ${c.saved} discovered chats saved; ${c.attachments} eligible attachments saved${unavailable?`; ${unavailable} attachments unavailable`:''}${deferred?`; ${deferred} attachments deferred for a later pass`:''}.` : `Finished available work: ${c.saved} saved; ${c.failed} chats and ${c.discovery} discovery sources need attention.`;
         if(this.job.options.library&&!indexOnly){const files=Object.values(this.job.library?.entries || {});if(files.length)this.job.message+=` Library: ${files.filter(f=>f.status==='saved').length} saved, ${files.filter(f=>f.parked).length} parked, ${files.filter(f=>f.status==='manual').length} manual downloads.`;}
         if(this.job.schedule?.fullScanPending && !this.job.sources.some(s=>s.error || !s.done)){this.job.schedule.fullScanPending=false;this.job.schedule.lastScanAt=this.now();}
-        Object.assign(awareness(this.job),{state:this.job.status,reason:this.job.message,waitUntil:0});this.event(this.job.message);await this.save();await this.io.report(this.job);break;
+        Object.assign(awareness(this.job),{state:this.job.status,reason:this.job.message,waitUntil:0});this.event(this.job.message);this.io.changed?.(this.job);await this.save();await this.io.report(this.job);break;
       }
-    } catch (error) {this.job.status='paused';this.job.message=error instanceof Paused ? error.message : `Paused: ${error.message}. Progress is saved; resolve the issue and resume.`;Object.assign(awareness(this.job),{state:'paused',reason:this.job.message,waitUntil:0});this.event(this.job.message);await this.save();}
+    } catch (error) {this.job.status='paused';this.job.message=error instanceof Paused ? error.message : `Paused: ${error.message}. Resolve the issue and resume.`;Object.assign(awareness(this.job),{state:'paused',reason:this.job.message,waitUntil:0});this.event(this.job.message);this.io.changed?.(this.job);await this.save();}
     this.io.changed?.(this.job);
   }
 }

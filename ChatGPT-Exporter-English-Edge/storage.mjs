@@ -1,3 +1,4 @@
+import {localStorageError} from './local-io.mjs';
 import {conversationTime} from './core.mjs';
 // Extension-owned database. Access tokens are never stored here.
 const ready = new Promise((resolve, reject) => {
@@ -13,10 +14,10 @@ export async function get(store, key) {
 export async function put(store, key, value) {
   if(store==='jobs'&&value)value.uiRevision=(value.uiRevision || 0)+1;
   const db = await ready;
-  return new Promise((resolve, reject) => {const tx = db.transaction(store, 'readwrite');tx.objectStore(store).put(value, key);tx.oncomplete = () => resolve();tx.onabort = tx.onerror = () => reject(tx.error || new Error('Local save failed'));});
+  return new Promise((resolve, reject) => {const tx = db.transaction(store, 'readwrite');tx.objectStore(store).put(value, key);tx.oncomplete = () => resolve();tx.onabort = tx.onerror = () => reject(localStorageError(tx.error || new Error('Local save failed'),'browser database write',store));});
 }
 // Internal index rows share the existing database; a batch commits atomically.
-export async function putMany(store,rows){const db=await ready;return new Promise((resolve,reject)=>{const tx=db.transaction(store,'readwrite'),s=tx.objectStore(store);for(const {key,value,deleted} of rows)deleted?s.delete(key):s.put(value,key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(tx.error || Error('Local index checkpoint failed.'));});}
+export async function putMany(store,rows){const db=await ready;return new Promise((resolve,reject)=>{const tx=db.transaction(store,'readwrite'),s=tx.objectStore(store);for(const {key,value,deleted} of rows)deleted?s.delete(key):s.put(value,key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(localStorageError(tx.error || Error('Local index checkpoint failed.'),'browser index checkpoint',store));});}
 export async function getPrefix(store,prefix){const db=await ready;return new Promise((resolve,reject)=>{const rows=[],tx=db.transaction(store),r=tx.objectStore(store).openCursor(IDBKeyRange.bound(prefix,prefix+'\uffff'));r.onsuccess=()=>{const c=r.result;if(!c)return resolve(rows);rows.push(c.value);c.continue();};r.onerror=()=>reject(r.error);});}
 export async function cacheInventory(scopeKey) {
   const db=await ready,prefix=scopeKey+':';

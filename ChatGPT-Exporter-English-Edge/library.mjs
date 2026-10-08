@@ -1,4 +1,5 @@
-import {seedFileSources,observeFileSource,finishLibraryPresence,rememberFileResult,retainedFileRows,sharedFileBudget,createFileLookup} from './file-links.mjs';
+import {localStorageFailure} from './local-io.mjs';
+import {seedFileSources,observeFileSource,finishLibraryPresence,rememberFileResult,retainedFileRows,sharedFileBudget,createFileLookup,fileReferences} from './file-links.mjs';
 import {beginLibraryScan,recordDiscovery,chooseLibrary,finishWork,schedulerState} from './work-scheduler.mjs';
 import {safeName,validId,epoch,compareText} from './core.mjs';
 import {validHash,analyzeFiles,applyImagePreference} from './file-intelligence.mjs';
@@ -76,6 +77,23 @@ export function retryLibraryFile(file,now=Date.now()) {
   if(!file || ['saved','manual'].includes(file.status))return false;
   Object.assign(file,{status:'pending',parked:false,parkedAt:null,attempts:0,retryAt:0,error:null,lastFailureStatus:null,retriedAt:now});return true;
 }
+export function recoverLocalFileFailures(job,now=Date.now()) {
+  const local=f=>!f.status&&/^A requested file or directory could not be found at the time an operation was processed\.?$/i.test(f.error || '');
+  let recovered=0;
+  for(const file of fileReferences(job)){
+    if(file.historical||['saved','manual'].includes(file.status)||!file.attempts)continue;
+    const history=file.failureHistory || [],charged=history.slice(-file.attempts),falseCharges=charged.filter(f=>!f.excludedFromBudget&&local(f));
+    // Older chat records have no history. Only the latest explicit local fault
+    // is proven there; retain the earlier unknown attempt conservatively.
+    const removed=falseCharges.length || (!history.length&&!file.lastFailureStatus&&local({error:file.error})?1:0);
+    if(!removed)continue;
+    for(const failure of falseCharges)failure.excludedFromBudget='local-filesystem';
+    const attempts=Math.max(0,file.attempts-removed);
+    file.localFailureRecovery={at:now,attemptsBefore:file.attempts,removed,remaining:attempts,error:file.error};
+    Object.assign(file,{status:'pending',parked:false,parkedAt:null,attempts,retryAt:0,error:null,lastFailureStatus:null,retriedAt:now,autoRetry:true});recovered++;
+  }
+  return recovered;
+}
 export function recordLibraryFailure(file,result,now=Date.now()) {
   const attempts=Math.min(LIBRARY_FAILURE_LIMIT,(file.attempts || 0)+1),parked=attempts>=LIBRARY_FAILURE_LIMIT;
   Object.assign(file,{attempts,parked,status:parked?'unavailable':'deferred',error:result.error || 'The file could not be downloaded.',lastFailureStatus:result.httpStatus || result.statusCode || null,lastFailureAt:now,retryAt:parked?0:now+120000,parkedAt:parked?now:null});
@@ -112,11 +130,11 @@ export async function processLibrary(engine,work) {
       source.lastPageAt=now();recordDiscovery(j,Object.keys(s.entries).length-knownBefore,Object.keys(s.entries).length,now());
       source.failures=0;source.error=null;s.mode=s.sources[0].mode;
       if(s.sources.every(x=>x.done&&!x.error)){s.lastScanAt=now();s.state=s.sources.some(x=>x.unsupported)?'incomplete':'indexed';finishLibraryPresence(j,s.sources.flatMap(x=>x.seenIds || []),now(),s.state==='indexed');engine.event(`Library inventory ready: ${Object.keys(s.entries).length} files; ${Object.values(s.entries).filter(x=>x.status==='manual').length} listed for manual download.${s.state==='incomplete'?' Some unsupported entries were skipped; other pages and folders were still scanned.':''}`,'info','library');}
-    }catch(e){if(['Paused','NotAllowedError','SecurityError','QuotaExceededError'].includes(e.name))throw e;source.failures=(source.failures || 0)+1;source.error=e.message;source.retryAt=now()+Math.min(6*3600000,60000*2**source.failures);s.state='incomplete';if(e.status===429)engine.io.libraryLimit?.(e);if([401,403,409].includes(e.status)){source.failures=3;source.retryAt=0;}engine.event(`Library discovery deferred: ${e.message}. Chat backups can continue.`,'warn','library');}
+    }catch(e){if(e.name==='Paused'||localStorageFailure(e))throw e;source.failures=(source.failures || 0)+1;source.error=e.message;source.retryAt=now()+Math.min(6*3600000,60000*2**source.failures);s.state='incomplete';if(e.status===429)engine.io.libraryLimit?.(e);if([401,403,409].includes(e.status)){source.failures=3;source.retryAt=0;}engine.event(`Library discovery deferred: ${e.message}. Chat backups can continue.`,'warn','library');}
   }else{
     const f=work.file,budget=sharedFileBudget(j,f);if(budget.attempts>(f.attempts || 0))f.attempts=budget.attempts;j.phase='library-file';j.message=`Saving file: ${f.name}`;await engine.save();
     try{const result=await engine.io.libraryDownload(f,async()=>{await engine.paceRequest('asset');});Object.assign(f,result);if(result.localPending){f.status='deferred';f.retryAt=now()+250;f.error=null;}else if(f.status==='saved'){f.localPending=false;f.savedAt=now();f.error=null;f.retryAt=0;f.parked=false;engine.event(`Library ${f.duplicate?'reused identical content':'saved'}: ${f.name} (${f.size} bytes).`,'info','library');}else if(f.status==='manual'){f.retryAt=0;engine.event(`Library manual download: ${f.name}.`,'info','library');}else if(result.httpStatus===429){f.status='deferred';f.retryAt=now()+120000;engine.io.libraryLimit?.({retryAfter:result.retryAfter});engine.event('Library downloads waiting for the server cooldown. Failure counts are unchanged.','warn','library');}else{recordLibraryFailure(f,result,now());engine.event(`Library ${f.parked?'parked':'failed'} ${f.attempts}/${LIBRARY_FAILURE_LIMIT}: ${f.name} — ${f.error}${f.parked?' · skipped until you explicitly retry it':''}.`,'warn','library');}}
-    catch(e){if(['Paused','NotAllowedError','SecurityError','QuotaExceededError'].includes(e.name))throw e;if(e.name==='YieldAttachments'){f.retryAt=now()+60000;}else{recordLibraryFailure(f,{error:e.message,httpStatus:e.status},now());engine.event(`Library ${f.parked?'parked':'failed'} ${f.attempts}/${LIBRARY_FAILURE_LIMIT}: ${f.name} — ${e.message}.`,'warn','library');}}
+    catch(e){if(e.name==='Paused'||localStorageFailure(e))throw e;if(e.name==='YieldAttachments'){f.retryAt=now()+60000;}else{recordLibraryFailure(f,{error:e.message,httpStatus:e.status},now());engine.event(`Library ${f.parked?'parked':'failed'} ${f.attempts}/${LIBRARY_FAILURE_LIMIT}: ${f.name} — ${e.message}.`,'warn','library');}}
   }
   if(work.file){rememberFileResult(j,work.file,{...work.file},{now:now()});finishWork(j,'library-file',{savedFile:work.file.status==='saved',now:now()});}else finishWork(j,'library-scan',{now:now()});
   j.phase=null;await engine.save();await engine.io.report(j);
