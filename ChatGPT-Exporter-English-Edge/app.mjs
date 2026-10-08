@@ -383,57 +383,68 @@ async function start(auto=false,observed=false) {
     enterWatching(job);await db.put('jobs',scope.key,job);update();return;
   }
   if(!observed && !hasReadyWork(job) && !watchCheckDue(job) && ['complete','incomplete','indexed','watching'].includes(job.status)){if(job.status==='watching')job.status=job.lastRunStatus || 'complete';await db.put('jobs',scope.key,job);update();return;}
-  running=true;update();engine=new Engine(job,{save:j=>db.put('jobs',scope.key,j),changed:update,request:async(path,expected,lastLimitSeen)=>{try {return await bridge({op:'get',path,scope:expected,lastLimitSeen});}catch {throw new Paused('The connected ChatGPT tab closed or navigated away. Click Connect, then resume.');}},refresh:async()=>{const r=await bridge({op:'context'});if (!r.ok) throw new Paused(r.error || 'Please sign in to ChatGPT again.');},cacheGet:key=>db.get('chats',key),cachePut:(key,value)=>db.put('chats',key,value),inventory:async s=>[...await db.cacheInventory(s.key),...await diskInventory()],diskRead,sense,write,report:engineReport,index,recover,hash:hashData,attachments:backupAttachments,libraryList:(source,expected)=>bridge({op:'libraryList',source,scope:expected,lastLimitSeen:job.lastLimitSeen || 0}),libraryDownload:downloadLibraryFile,libraryVerify:verifyLibraryFile,maintenance:maintenanceTurn,libraryLimit:e=>{limited(job.pace,e.retryAfter);recordLimit(job);},online:()=>…15259 tokens truncated… 0)<=this.now()):null;
-        const attachment=!indexOnly&&this.job.options.attachments!==false?Object.values(this.job.entries).filter(e=>e.status==='saved'&&(!e.attachmentScannedAt||e.attachmentPending)&&(e.attachmentRetryAt || 0)<=this.now()).sort((a,b)=>(a.attachmentLastTurnAt || 0)-(b.attachmentLastTurnAt || 0)||calendarTime(a)-calendarTime(b))[0]:null;
-        const verifyKey=f=>`${f.path}:${f.size}:${f.sha256 || ''}`;
-        const verify=!indexOnly&&this.io.libraryList&&this.job.options.library&&this.io.libraryVerify?fileReferences(this.job).find(f=>f.status==='saved'&&f.path&&!this.libraryChecked.has(verifyKey(f))):null;
-        const library=!indexOnly&&this.io.libraryList&&this.job.options.library?libraryWork(this.job,this.now()):null;
-        let recent=null;
-        if(watchCheckDue(this.job,this.now())){
-          const plan=decide(this.job,[],'discovery',this.now());
-          if(!plan.attention&&(!plan.until||['spacing','traffic-rest'].includes(plan.state)))recent=true;
-          else {this.job.schedule.checkState=plan.attention?'needs-attention':'waiting';this.job.schedule.checkWaitReason=plan.reason;this.job.schedule.checkWaitUntil=plan.until || 0;}
-        }
-        const decision=pickWork(this.job,{chat:ready,'chat-scan':source || repair,attachment,library,verify,recent},{urgent:urgentReady===ready&&!!ready,local:!!localReady,now:this.now()});
-        if(decision){
-          beginWork(this.job,decision,this.now());
-          if(decision.lane==='library'){const share=schedulerState(this.job,this.now()).library;const policy=libraryPolicy(this.job,this.now());if(share.loggedShare!==policy.downloadShare){share.loggedShare=policy.downloadShare;this.event(`Queue policy: ${policy.downloadShare}% Library download turns while both Library queues are ready. ${policy.reason}`,'info','library');}}
-          this.io.changed?.(this.job);
-          if(decision.lane==='chat'){
-            try{await this.process(ready);}catch(error){
-              if(error instanceof Paused || localStorageFailure(error))throw error;
-              ready.attempts=(ready.attempts || 0)+1;ready.status=ready.attempts>=3?'failed':'pending';ready.retryAt=ready.status==='pending'?this.now()+60000*ready.attempts:0;ready.error=error.message || String(error);this.job.phase=null;
-              this.event(`File work ${ready.status==='failed'?'needs attention':'deferred'}: ${ready.title} — ${ready.error}. Continuing other chats.`);await this.save();
-            }
-          }else if(decision.lane==='chat-scan'){
-            const selected=decision.work;
-            if(selected.error){Object.assign(selected,{error:null,done:false,offset:0,cursor:selected.kind==='project'?'0':null,seenPages:[],uniqueIds:[],emptyChecks:0,reportedTotal:0});this.event(`Repairing only the incomplete discovery route: ${selected.title || selected.key}.`);}
-            await this.discover(selected);
-          }else if(decision.lane==='attachment')await this.processAttachments(attachment);
-          else if(decision.lane==='library')await processLibrary(this,library);
-          else if(decision.lane==='recent')await this.checkRecentChats();
-          else if(decision.lane==='verify'){
-            this.libraryChecked.add(verifyKey(verify));
-            if(!await this.io.libraryVerify(verify)){verify.status=verify.historical?'unavailable':'pending';verify.path=null;verify.retryAt=0;this.event(`Library saved copy needs repair: ${verify.name}.`,'warn','library');await this.save();}
-          }
-          if(decision.lane!=='library')finishWork(this.job,decision.lane,{savedFile:decision.lane==='attachment'&&this.attachmentTurnSaved,urgent:urgentReady===ready&&!!ready,local:!!localReady,now:this.now()});
-          if((this.job.workScheduler?.completed || 0)%10===0){await this.holdPoint();await this.io.maintenance?.();}
-          continue;
-        }
-        if(await this.io.maintenance?.())continue;
-        const fileLookup=createFileLookup(this.job);
-        const libraryWaits=!indexOnly&&this.job.options.library?[...fileReferences(this.job).filter(f=>!f.historical&&!f.external&&!f.parked&&['pending','deferred'].includes(f.status)&&(f.attempts || 0)<2&&!sharedFileBudget(this.job,f,fileLookup).parked&&(f.sourceKind!=='chat'||this.job.options.attachments!==false)).map(f=>f.retryAt),...(this.job.library?.sources || []).filter(s=>s.error&&s.failures<3).map(s=>s.retryAt)]:[];
-        const waits=[...(indexOnly?[]:pending.map(e=>e.retryAt)),...(this.job.options.verify!==false?this.job.sources.filter(s=>s.error&&(s.failures || 0)<=2).map(s=>s.retryAt):[]),...libraryWaits].filter(t=>t>this.now());if (waits.length) {await this.wait(Math.min(...waits),'Waiting to revisit unresolved work after a quiet period…');continue;}
-        const audit=this.job.discoveryAudit;
-        if(this.job.options.verify!==false && this.job.sources.length && !this.job.sources.some(s=>s.error || !s.done) && !audit.stable){audit.stable=true;audit.verifiedAt=this.now();audit.round=0;this.event('Discovery traversal completed cleanly; skipped the old redundant full-list verification loop.');await this.save();}
-        const c=counts(this.job);this.job.status=c.failed || c.discovery ? 'incomplete':indexOnly?'indexed':'complete';
-        const assets=Object.values(this.job.entries).flatMap(e=>e.attachments || []),unavailable=assets.filter(a=>['unavailable','permission-unavailable','failed'].includes(a.status)).length,deferred=assets.filter(a=>['deferred','rate-limited'].includes(a.status)).length;
-        this.job.message=this.job.status==='indexed' ? `${c.total} links indexed on disk. ${c.pending} chats remain to download.` : this.job.status==='complete' ? `Finished: ${c.saved} discovered chats saved; ${c.attachments} eligible attachments saved${unavailable?`; ${unavailable} attachments unavailable`:''}${deferred?`; ${deferred} attachments deferred for a later pass`:''}.` : `Finished available work: ${c.saved} saved; ${c.failed} chats and ${c.discovery} discovery sources need attention.`;
-        if(this.job.options.library&&!indexOnly){const files=Object.values(this.job.library?.entries || {});if(files.length)this.job.message+=` Library: ${files.filter(f=>f.status==='saved').length} saved, ${files.filter(f=>f.parked).length} parked, ${files.filter(f=>f.status==='manual').length} manual downloads.`;}
-        if(this.job.schedule?.fullScanPending && !this.job.sources.some(s=>s.error || !s.done)){this.job.schedule.fullScanPending=false;this.job.schedule.lastScanAt=this.now();}
-        Object.assign(awareness(this.job),{state:this.job.status,reason:this.job.message,waitUntil:0});this.event(this.job.message);this.io.changed?.(this.job);await this.save();await this.io.report(this.job);break;
-      }
-    } catch (error) {this.job.status='paused';this.job.message=error instanceof Paused ? error.message : `Paused: ${error.message}. Resolve the issue and resume.`;Object.assign(awareness(this.job),{state:'paused',reason:this.job.message,waitUntil:0});this.event(this.job.message);this.io.changed?.(this.job);await this.save();}
-    this.io.changed?.(this.job);
-  }
+  running=true;update();engine=new Engine(job,{save:j=>db.put('jobs',scope.key,j),changed:update,request:async(path,expected,lastLimitSeen)=>{try {return await bridge({op:'get',path,scope:expected,lastLimitSeen});}catch {throw new Paused('The connected ChatGPT tab closed or navigated away. Click Connect, then resume.');}},refresh:async()=>{const r=await bridge({op:'context'});if (!r.ok) throw new Paused(r.error || 'Please sign in to ChatGPT again.');},cacheGet:key=>db.get('chats',key),cachePut:(key,value)=>db.put('chats',key,value),inventory:async s=>[...await db.cacheInventory(s.key),...await diskInventory()],diskRead,sense,write,report:engineReport,index,recover,hash:hashData,attachments:backupAttachments,libraryList:(source,expected)=>bridge({op:'libraryList',source,scope:expected,lastLimitSeen:job.lastLimitSeen || 0}),libraryDownload:downloadLibraryFile,libraryVerify:verifyLibraryFile,maintenance:maintenanceTurn,libraryLimit:e=>{limited(job.pace,e.retryAfter);recordLimit(job);},online:()=>navigator.onLine});
+  try {await engine.run();if(opts.passive && !job.schedule.suspended && ['complete','incomplete','indexed'].includes(job.status)){enterWatching(job);await db.put('jobs',scope.key,job);await report(job);}} finally {await localFiles.flush();await flushMaintenance();running=false;if(job && root)await libraryReport(job);update();}
+  }finally{starting=false;update();}
 }
+function download(blob,name) {const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+function bind(id,handler) {$(id).addEventListener('click',()=>{notice='';Promise.resolve().then(handler).catch(error);});}
+async function passiveTick(){
+  if(!job || !scope || !connected || !job.schedule?.enabled || job.schedule.suspended)return;job.schedule.lastTickAt=Date.now();if(passiveBusy || running){update();return;}passiveBusy=true;
+  try{
+    const now=Date.now();
+    if(!navigator.onLine){if(job.schedule.checkState!=='offline'){job.schedule.checkState='offline';job.schedule.checkError='Offline: waiting for an internet connection.';appendEvent(job,'Offline: network watcher deferred; saved files and queue retained.',now,'warn','network');await db.put('jobs',scope.key,job);}update();return;}
+    const libraryDue=queueLibraryScan(job,now);
+    if(queueFullScanIfDue(job,now)){await db.put('jobs',scope.key,job);await start(true,true);return;}
+    const snapshots=await sense(scope);job.schedule.lastTelemetryAt=now;job.schedule.observedTabs=snapshots.length;
+    const recentDue=watchCheckDue(job,now) && now>=Math.max(job.pace.until || 0,job.pace.next || 0,job.schedule.checkWaitUntil || 0);
+    if(libraryDue || recentDue || hasObservedWork(job,snapshots) || hasReadyWork(job,now)){job.schedule.lastTelemetryAt=now;job.status='ready';job.message='Passive observation found new, changed, or due work; resuming the saved queue…';await db.put('jobs',scope.key,job);await start(true,true);}else if(job.status!=='watching'){enterWatching(job,now);await db.put('jobs',scope.key,job);update();}
+  }catch(e){job.message=`Passive watcher deferred: ${e.message || e}`;await db.put('jobs',scope.key,job).catch(()=>{});update();}finally{passiveBusy=false;}
+}
+async function init() {
+  logPanel=new LogPanel(document,{download,onError:error});
+  libraryPanel=new LibraryPanel(document,{onError:error,retry:async id=>{if(running || !canEdit || initializing)return;await ensureLibraryJob();if(!retryLinkedFile(job,job.library.entries[id] || Object.values(job.fileLinks?.sources || {}).find(f=>f.sourceKey===id || f.id===id)))return;await db.put('jobs',scope.key,job);await report(job);update();await start(false,true);}});
+  bind('library-deduplicate',deduplicateFiles);
+  bind('library-scan',async()=>{await ensureLibraryJob();queueLibraryScan(job,Date.now(),true);await db.put('jobs',scope.key,job);await start(false,true);});
+  bind('library-retry',async()=>{await ensureLibraryJob();for(const f of fileReferences(job))if(f.parked || ['unavailable','permission-unavailable'].includes(f.status))retryLinkedFile(job,f);await db.put('jobs',scope.key,job);await report(job);await start(false,true);});
+  bind('library-index',()=>{if(job)download(new Blob([JSON.stringify(libraryIndex(job),null,2)],{type:'application/json'}),'chatgpt-library-index.json');});
+  bind('library-manual',()=>{if(job)download(new Blob([catalogHTML(job,true)],{type:'text/html'}),'chatgpt-library-manual-downloads.html');});
+
+  addEventListener('online',()=>{if(job?.schedule){job.schedule.checkError=null;job.schedule.checkWaitUntil=0;}void passiveTick();});
+  update();
+  bind('connect',async()=>{connecting=true;update();try{await connect();}finally{connecting=false;update();}});
+  bind('folder',async()=>{
+    if(!scope)throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker(pickerOptions('backup')),previous=root || folder;
+    beginDetection();try{
+    await resetLocalIndex();folder=next;root=null;rootDetection=null;backupInput=null;diskFiles=null;diskIndexEntries=null;
+    await folderReady();if(job&&(!previous||!await previous.isSameEntry(root))){for(const e of Object.values(job.entries))if(e.status==='saved'){e.localPreviouslySaved=true;e.status='pending';e.retryAt=0;}for(const f of fileReferences(job))if(f.status==='saved'){f.status='pending';f.retryAt=0;}job.status='ready';}
+    await detectLocalState();await buildLocalAttachmentIndex();update();
+    }finally{endDetection();}
+  });
+  bind('attachment-library',async()=>{
+    if(!scope)throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker(pickerOptions('library'));await resetLocalIndex();attachmentLibrary=next;await db.put('meta',`attachmentLibrary:${scope.key}`,attachmentLibrary);await rememberLocation(attachmentLibrary,'library');
+    beginDetection();try{await buildLocalAttachmentIndex();if(folder){await folderReady(false);diskFiles=null;diskIndexEntries=null;await detectLocalState();await reconcileLocalAttachments();}}finally{endDetection();}
+  });
+  bind('local-rescan',async()=>{beginDetection();try{diskFiles=null;diskIndexEntries=null;if(folder)await detectLocalState();await buildLocalAttachmentIndex(true);contentStore.reset();if(job&&root)await reconcileLocalAttachments();}finally{endDetection();}});
+  bind('repair-attachments',async()=>{
+    if(!job || !connected)throw new Paused('Connect to ChatGPT first.');await folderReady(true);
+    let queued=0;for(const e of Object.values(job.entries || {}))if(repairAttachmentEntry(e,true))queued++;
+    job.options.attachments=true;$('attachments').checked=true;job.status='ready';await buildLocalAttachmentIndex(true);job.attachmentRepairGeneration=(job.attachmentRepairGeneration || 0)+1;
+    job.message=`Attachment repair queued for ${queued} chats using saved JSON. Valid files are reused; error responses are preserved under attachment-errors before retrying.`;
+    job.events ||= [];job.events.push({at:Date.now(),message:job.message});job.events=job.events.slice(-1500);
+    await db.put('jobs',scope.key,job);await report(job);update();await start();
+  });
+  bind('start',()=>start());bind('hold',async()=>{if(!running || !engine)return;engine.held=!engine.held;await localFiles.flush();job.status=engine.held?'held':'running';job.message=engine.held?'Held in place. The live worker, queue position, discovery cursors, and connection stay open; no new network work starts until you resume.':'Resuming the same live run exactly where it was held.';job.events ||= [];job.events.push({at:Date.now(),message:job.message});job.events=job.events.slice(-1500);await db.put('jobs',scope.key,job);update();});bind('pause',async()=>{if(job?.schedule)job.schedule.suspended=true;if(!running && job){job.status='paused';job.message='Passive watch stopped. Queue, saved files and discovery cursors are retained. Press Start to resume watching.';Object.assign(job.awareness ||= {},{state:'paused',reason:job.message,waitUntil:0});await db.put('jobs',scope.key,job);update();return;}if(engine){engine.stopped=true;await localFiles.flush();job.status='pausing';job.message='Stopping the active run after the current request / disk write…';await db.put('jobs',scope.key,job);update();}});
+  bind('retry',async()=>{if (!job) return;const now=Date.now();let parked=0,requeued=0;if(job.discoveryUncertain){job.sources=newJob(scope,job.options).sources;job.discoveryAudit={round:0,baseline:Object.keys(job.entries || {}).length,stable:false};job.discoveryUncertain=false;}for (const e of Object.values(job.entries)){if(e.status==='failed'){if((e.brokenUntil || 0)>now){parked++;}else{e.status='pending';e.attempts=0;e.retryAt=0;e.recoveryAttempted=false;e.brokenUntil=0;requeued++;}}if(e.attachmentPending){e.attachmentRetryAt=0;e.attachmentScannedAt=0;}}for (const s of job.sources) if(s.error){s.error=null;s.done=false;s.seenPages=[];s.uniqueIds=[];s.emptyChecks=0;s.failures=0;s.reportedTotal=0;if(s.kind==='list')s.offset=0;else s.cursor=s.kind==='project'?'0':null;}job.status='ready';job.message=`Requeued ${requeued} unresolved chat${requeued===1?'':'s'}; ${parked} hard failure${parked===1?'':'s'} checked within the last 7 days stayed parked. Transient attachment retries were reopened; hard attachment failures stay retired.`;await db.put('jobs',scope.key,job);await start();});
+  bind('scan',async()=>{if (!job) return;resetSourcesForScan();await db.put('jobs',scope.key,job);await start();});
+  bind('add',async()=>{if(!scope) throw new Paused('Connect first.');if(!job) job=newJob(scope,{archived:$('archived').checked,projects:$('projects').checked,assist:$('assist').checked,verify:$('verify').checked,attachments:$('attachments').checked,passive:$('passive').checked,passiveHours:Number($('passive-hours').value)||3});addIds();job.status='ready';job.message='Added links to the queue. Click Start / resume.';await db.put('jobs',scope.key,job);update();});
+  bind('report',async()=>{if(job) download(new Blob([JSON.stringify(reportData(job),null,2)],{type:'application/json'}),'export-report.json');});bind('index',async()=>{if(job)download(new Blob([JSON.stringify(indexData(job),null,2)],{type:'application/json'}),'conversation-index.json');});
+  bind('export-state',async()=>{if(job)download(new Blob([JSON.stringify(portableData(job),null,2)],{type:'application/json'}),`chatgpt-exporter-portable-state-${new Date().toISOString().slice(0,10)}.json`);});bind('import-state',()=>$('state-file').click());$('state-file').addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;await importPortableObject(JSON.parse(await file.text()));e.target.value='';});
+  bind('zip',async()=>{if (!job) throw new Error('There are no cached chats yet.');$('zip').disabled=true;try {const zip=new JSZip();let n=0,bytes=0;for (const e of Object.values(job.entries)) {const record=await db.get('chats',`${scope.key}:${e.id}`);if(!record)continue;const json=JSON.stringify(record.data,null,2),md=markdown(record.data,e.id);bytes+=new TextEncoder().encode(json+md).length;if(bytes>250*1024*1024)throw new Error('The backup is too large for a memory-based ZIP. Your individual folder files remain available. Use Windows to compress the backup folder after the export finishes.');const name=e.basename || e.id;zip.file(`json/${name}.json`,json);zip.file(`markdown/${name}.md`,md);n++;}if(!n)throw new Error('No conversation data has been cached yet.');zip.file('export-report.json',JSON.stringify({...reportData(job),zip_cached_count:n},null,2));zip.file('conversation-index.json',JSON.stringify(indexData(job),null,2));zip.file('portable-state.json',JSON.stringify(portableData(job),null,2));download(await zip.generateAsync({type:'blob',compression:'DEFLATE'}),`chatgpt-cached-${n}-${new Date().toISOString().slice(0,10)}.zip`);} finally {$('zip').disabled=false;}});
+  for(const id of ['passive','passive-hours','recent-check-minutes','attachments','download-images','library-enabled','smart-watch'])$(id).addEventListener('change',async()=>{if(!job)return;job.options.downloadImages=$('download-images').checked;if(id==='download-images')applyImagePreference(job);if(id==='download-images'&&job.options.downloadImages)for(const e of Object.values(job.entries || {}))if(e.status==='saved'){e.attachmentPending=true;e.attachmentRetryAt=0;e.attachmentScannedAt=0;}job.options.library=$('library-enabled').checked;job.options.smartWatch=$('smart-watch').checked;job.options.passive=$('passive').checked;job.options.passiveHours=Number($('passive-hours').value)||3;job.options.attachments=$('attachments').checked;job.options.yieldUser=$('yield-user').checked;job.schedule ||= newJob(scope,job.options).schedule;job.schedule.enabled=job.options.passive;if(id==='passive')job.schedule.suspended=!job.options.passive;job.schedule.intervalMs=job.options.passiveHours*3600000;if(id==='passive-hours' || id==='passive' && job.options.passive)job.schedule.nextScanAt=Date.now()+job.schedule.intervalMs;if(id==='recent-check-minutes'){job.schedule.recentIntervalMs=Number($('recent-check-minutes').value)*60000;job.schedule.nextCheckAt=Date.now();}job.updated=Date.now();update();try{await db.put('jobs',scope.key,job);if(root)await report(job);}catch(e){error(e);}update();});
+  $('yield-user').addEventListener('change',()=>{if(!job){update();return;}job.message=setUserYield(job,$('yield-user').checked);engine?.wake?.();update();void db.put('jobs',scope.key,job).catch(error);});
+  tabId=(await chrome.storage.session.get('exporterTabId')).exporterTabId;scope=await db.get('meta','lastScope');if (scope) {job=await db.get('jobs',scope.key);if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`);attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;}initializing=false;applyJobOptionsToUI();update();setInterval(update,1000);setInterval(passiveTick,60000);chrome.runtime.onMessage.addListener(msg=>{if(msg?.type==='passive-tick')void passiveTick();});
+  if (job?.status==='running' || job?.status==='watching' && job.schedule?.enabled && !job.schedule.suspended) {try {running=true;const restoring=engine={stopped:false};if(restoring.stopped)throw new Paused('Paused by you.');await connect(scope.key);if(restoring.stopped)throw new Paused('Paused by you.');running=false;await start(true);} catch(e){if(job){job.status='paused';job.message=`Saved progress found. ${e.message}`;await db.put('jobs',scope.key,job);}}finally{running=false;update();}}
+  else if (job?.status==='pausing' || job?.status==='held') {job.status='paused';job.message='The previous live hold/run is no longer in memory, but its exact queue/cursors are preserved. Click Connect, then resume; no scan reset is performed.';await db.put('jobs',scope.key,job);update();}
+}
+navigator.locks.request('english-exporter-dashboard',{ifAvailable:true},async lock=>{if(!lock){canEdit=false;update();$('message').textContent='Another exporter tab is already open. Continue there, or close it and reload this tab.';return;}await init();await new Promise(()=>{});}).catch(error);
