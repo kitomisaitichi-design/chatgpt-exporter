@@ -1,6 +1,6 @@
 # Complete feature guide
 
-Exporter 2.4.17 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Validation](VALIDATION.md)
+Exporter 2.4.18 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Validation](VALIDATION.md)
 
 ## Functionality at a glance
 
@@ -122,7 +122,7 @@ New binaries use `attachments/content/<sha256>/<compact-name>`, so different con
 
 Point your **kitomisaitichi-design/chatgpt-viewer** at the complete backup folder, keeping `conversation-index.json`, `json/`, `markdown/` and `attachments/` together. Existing native conversation JSON, branches, IDs, timestamps, classifications and basenames keep their format. The conversation index attaches Library files where a source conversation ID is available. Unlinked Library files stay in the file catalog; they are not invented conversations.
 
-Exporter 2.4.17 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. Hash-alias, version-evidence, image-preference, native-file-ID and independent source-reference fields are additive. Historical versions have separate catalog identities so Viewer retains distinct bytes. Viewer 1.1.6 retains the file catalog reader and uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<compact-name>` shared copies.
+Exporter 2.4.18 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-index/v1` and `chatgpt-exporter-viewer/v1` catalog formats. Hash-alias, version-evidence, image-preference, native-file-ID and independent source-reference fields are additive. Historical versions have separate catalog identities so Viewer retains distinct bytes. Viewer 1.1.6 retains the file catalog reader and uses each catalog entry's relative file path, so it supports both retained legacy paths and `attachments/content/<sha256>/<compact-name>` shared copies.
 
 | Exporter feature | Viewer behavior |
 | --- | --- |

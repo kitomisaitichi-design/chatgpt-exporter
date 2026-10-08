@@ -4,6 +4,7 @@ This lists **every published GitHub release** plus the earlier development build
 
 | Version | Changes introduced | Release and detailed history |
 | --- | --- | --- |
+| **2.4.18** | Bind native browser fetch for the release checker and installer helpers; compact overview/watcher layout independent of sidebar height; spaced update controls and collapsible installation help. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.18) · [Full notes](../ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.18.md) |
 | **2.4.17** | Scheduled release notices (12h/24h/weekly/off), optional verified idle installation with rollback, clearer chat rescan control, reorganized guide and high-resolution sample demos. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.17) · [Full notes](../ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.17.md) |
 | **2.4.16** | Short disk names, compact-path retry and visible per-file skip after two local write failures; preserve permission/quota pauses and remote failure budgets. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.16) · [Full notes](../ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.16.md) |
 | **2.4.15** | Stale local file recovery; distinguish storage failures from remote failures; actionable quota diagnostics. | [Release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.15) · [Full notes](../ChatGPT-Exporter-English-Edge/CHANGELOG-v2.4.15.md) |

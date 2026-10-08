@@ -4,7 +4,7 @@ const REPO='https://github.com/kitomisaitichi-design/chatgpt-exporter',API='http
 const PREFIX='ChatGPT-Exporter-English-Edge/',LIMIT=16*1024*1024;
 export const sha256=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
 export async function boundedBytes(response,limit=LIMIT){if(!response.ok)throw Error(`Release download returned HTTP ${response.status}.`);if(Number(response.headers.get('content-length'))>limit)throw Error('Release exceeds the installation size limit.');const reader=response.body.getReader(),parts=[];let size=0;try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit)throw Error('Release exceeds the installation size limit.');parts.push(value);}}finally{await reader.cancel().catch(()=>{});}const bytes=new Uint8Array(size);let at=0;for(const part of parts){bytes.set(part,at);at+=part.length;}return bytes;}
-export async function releaseFiles(version,{fetch=globalThis.fetch,Zip=globalThis.JSZip}={}){
+export async function releaseFiles(version,{fetch=globalThis.fetch.bind(globalThis),Zip=globalThis.JSZip}={}){
  if(!/^\d+\.\d+\.\d+$/.test(version))throw Error('Invalid release version.');
  const signal=AbortSignal.timeout(60000),response=await fetch(API+version,{signal,cache:'no-cache'});if(!response.ok)throw Error(`Release lookup returned HTTP ${response.status}.`);const release=await response.json(),name=`ChatGPT-Exporter-English-Edge-v${version}.zip`,url=`${REPO}/releases/download/ChatGPT${version}/${name}`;
  if(release.tag_name!==`ChatGPT${version}`||release.draft||release.prerelease||release.html_url!==`${REPO}/releases/tag/ChatGPT${version}`)throw Error('Unexpected release metadata.');
@@ -25,7 +25,7 @@ export async function readFile(root,path){try{const bits=path.split('/');let dir
 export async function writeFile(root,path,bytes){const bits=path.split('/');let dir=root;for(const bit of bits.slice(0,-1))dir=await dir.getDirectoryHandle(bit,{create:true});const writer=await(await dir.getFileHandle(bits.at(-1),{create:true})).createWritable();try{await writer.write(bytes);await writer.close();}catch(e){await writer.abort().catch(()=>{});throw e;}}
 async function removeFile(root,path){const bits=path.split('/');let dir=root;for(const bit of bits.slice(0,-1))dir=await dir.getDirectoryHandle(bit);await dir.removeEntry(bits.at(-1));}
 const same=(a,b)=>a&&b&&a.length===b.length&&a.every((x,i)=>x===b[i]);
-export async function validateInstallationFolder(root,runtime,{fetch=globalThis.fetch}={}){
+export async function validateInstallationFolder(root,runtime,{fetch=globalThis.fetch.bind(globalThis)}={}){
  const manifest=JSON.parse(new TextDecoder().decode(await readFile(root,'manifest.json'))),current=runtime.getManifest();if(manifest.version!==current.version||manifest.name!==current.name)throw Error('Choose the currently loaded extension folder, not a backup folder.');
  const path=`exporter-install-probe-${crypto.randomUUID()}.txt`,nonce=crypto.randomUUID();await writeFile(root,path,new TextEncoder().encode(nonce));try{const response=await fetch(runtime.getURL(path),{cache:'no-store'});if(!response.ok||await response.text()!==nonce)throw Error('The selected folder is not the loaded extension directory.');}finally{await removeFile(root,path);}
  return true;

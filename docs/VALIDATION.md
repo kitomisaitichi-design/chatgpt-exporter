@@ -1,8 +1,10 @@
-# Validation for 2.4.17
+# Validation for 2.4.18
 
-209 Node regression tests pass; runtime JS/MJS syntax checks pass. New cases cover update schedule/default/off persistence, manual checks, duplicate-request sharing, ETag responses, malformed releases, offline retry and cancellation. Installer cases cover idle/default-off gating, concurrent turns, local Viewer edits, extra/conflicting files, permission loss, checksum/path validation, partial-write rollback and interrupted-checkpoint recovery.
+210 Node regression tests pass; runtime JS/MJS syntax checks pass. New cases cover update schedule/default/off persistence, manual checks, duplicate-request sharing, ETag responses, malformed releases, offline retry and cancellation. Installer cases cover idle/default-off gating, concurrent turns, local Viewer edits, extra/conflicting files, permission loss, checksum/path validation, partial-write rollback and interrupted-checkpoint recovery.
 
-Isolated Microsoft Edge uses the actual dashboard and synthetic data: all four update schedules, double Check now, reload persistence, optional installer preference and missing-folder instruction, 80 cached sample chats saved with zero conversation-detail requests, conditional Hold/Resume, Library views/search/manual filters/images and log filters/reset; no page errors. No private data is included in published demos.
+New v2.4.18 checks reproduce the real native service-worker Illegal invocation before the fix and complete an official GitHub release check after it, without a fetch shim. A forced tall sidebar reproduces a 784 px overview/watcher gap before the fix; after it, gaps are 18–23 px at 1920/1440/1100/900/390 widths, Library remains full-width and there is no horizontal overflow. Double Check now, refresh, unique IDs and page errors are checked.
+
+Historical v2.4.17 isolated Microsoft Edge used the actual dashboard and synthetic data: all four update schedules, double Check now, reload persistence, optional installer preference and missing-folder instruction, 80 cached sample chats saved with zero conversation-detail requests, conditional Hold/Resume, Library views/search/manual filters/images and log filters/reset; no page errors. No private data is included in published demos.
 
 Real installation-folder picker access, automatic physical replacement/reload of the user's loaded extension, live private-account backup and a fresh full import into the latest Viewer were not run as part of these browser fixtures. Filesystem installer transaction tests use controlled in-memory handles; they do not prove the user's grant or browser reload behavior.
 
