@@ -1,7 +1,9 @@
+import {missingLocalFile} from './local-io.mjs';
 import {fileReferences,relatedFiles,compatibleFile,rememberFileResult,createFileLookup,registerFileReference,invalidateFileLookup} from './file-links.mjs';
 export {fileReferences} from './file-links.mjs';
 import {epoch,safeName,attachmentError,ATTACHMENT_MAX_BYTES,compareText} from './core.mjs';
 
+export function contentFileName(value,max=64){const name=String(value || 'file'),ext=name.match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';return safeName(ext?name.slice(0,-ext.length):name,max-ext.length)+ext;}
 export const validHash=value=>typeof value==='string' && /^[a-f0-9]{64}$/i.test(value)?value.toLowerCase():null;
 export const isImage=file=>/^image\//i.test(file?.mime || file?.mime_type || '') || /\.(?:png|jpe?g|gif|webp|avif|bmp|svg|ico|tiff?|heic|heif|jxl)$/i.test(file?.name || '');
 export function applyImagePreference(job){
@@ -77,8 +79,19 @@ export class ContentStore {
     if(blob.size===0 || blob.size>maxBytes)throw Error('File is outside its byte limit.');
     const hash=await contentHash(blob),expected=validHash(file.remoteSha256);if(expected&&expected!==hash)throw Error('File bytes do not match the reported SHA-256.');
     const reused=await this.find(hash,{size:blob.size,maxBytes,exclude:file});if(reused)return rememberFileResult(this.getJob(),file,reused);
-    const path=`attachments/content/${hash}/${safeName(file.name || file.id || 'file',160)}`;
-    await this.checkpoint();await this.write(path,blob);const observed=await this.onWrite(path,blob,hash,file);this.verified.set(path,{blob:observed || blob,hash});
+    let path=`attachments/content/${hash}/${contentFileName(file.name || file.id || 'file')}`;
+    const errors=[];
+    for(let attempt=0;attempt<2;attempt++){
+      await this.checkpoint();
+      try{await this.write(path,blob);break;}catch(e){
+        if(!missingLocalFile(e)||e.stage==='directory')throw e;
+        errors.push({path,name:e.name,error:e.message,at:this.now()});
+        if(attempt===1)return rememberFileResult(this.getJob(),file,{status:'manual',localWriteSkipped:true,localWriteAttempts:2,localWriteErrors:errors,error:'Skipped this file after two local write failures. Other files continue; use Retry after fixing its local destination.',autoRetry:false,parked:false,size:blob.size,mime:blob.type || file.mime || null});
+        const ext=contentFileName(file.name).match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';
+        path=`attachments/content/${hash}/file${ext}`;
+      }
+    }
+    const observed=await this.onWrite(path,blob,hash,file);this.verified.set(path,{blob:observed || blob,hash});
     return rememberFileResult(this.getJob(),file,{status:'saved',source,refresh:false,size:blob.size,path,sha256:hash,duplicateOf:null,duplicate:false,mime:blob.type || file.mime || null});
   }
   async maintenanceTurn(){

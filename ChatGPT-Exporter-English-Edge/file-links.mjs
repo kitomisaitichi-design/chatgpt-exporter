@@ -70,6 +70,7 @@ export function rememberFileResult(job,file,result,{failure=false,now=Date.now()
     const {urls,asset_pointer,download_url,download_link,...durable}=result;Object.assign(source,durable);
     for(const f of new Set([file,...peers,source]))registerFileReference(job,f);return {...result};
   }
+  if(result.localWriteSkipped){for(const f of new Set([file,...peers,source]))if(f.status!=='saved'){Object.assign(f,result,{status:'manual',autoRetry:false,parked:false,retryAt:0});registerFileReference(job,f);}return {...result};}
   const {urls,asset_pointer,download_url,download_link,...durable}=result;Object.assign(source,durable);
   if(source.status==='skipped-too-large')source.status='manual';
   if(failure||file.attempts){const progress={attempts,parked:attempts>=2,...attempts>=2?{status:'unavailable',retryAt:0,autoRetry:false}:failure?{status:'deferred',retryAt:now+120000,autoRetry:true}:{}};for(const f of new Set([file,...peers,source]))if(f.status!=='saved')Object.assign(f,progress);Object.assign(result,progress);}
@@ -86,7 +87,7 @@ export function sharedFileBudget(job,file,lookup){const peers=relatedFiles(job,f
 export function retryLinkedFile(job,file,now=Date.now()){
   if(!file)return false;let changed=false;
   const peers=relatedFiles(job,file).filter(f=>!f.historical&&(f===file || compatibleFile({...file,refresh:false},{...f,refresh:false})));
-  for(const f of peers)if(f.status!=='saved'&&f.status!=='manual'){Object.assign(f,{status:'pending',attempts:0,parked:false,retryAt:0,error:null,retriedAt:now,autoRetry:true});changed=true;}
+  for(const f of peers)if(f.status!=='saved'&&(f.status!=='manual'||f.localWriteSkipped)){Object.assign(f,{status:'pending',attempts:0,parked:false,retryAt:0,error:null,retriedAt:now,autoRetry:true,localWriteSkipped:false});changed=true;}
   for(const e of Object.values(job.entries || {}))if(e.status==='saved'&&(e.attachments || []).some(a=>peers.includes(a))){e.attachmentPending=true;e.attachmentRetryAt=0;e.attachmentScannedAt=0;}
   return changed;
 }

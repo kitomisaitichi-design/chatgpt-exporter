@@ -1,12 +1,16 @@
 # ChatGPT Exporter — English Autopilot for Microsoft Edge
 
-**Version 2.4.15 · October 8, 2026**
+**Version 2.4.16 · October 8, 2026**
 
 Build a local backup of the conversations available to your signed-in ChatGPT web session. The extension discovers active, archived and project chats, writes conversation JSON and readable Markdown, tracks revisions, and backs up eligible attachments. Your backup stays in the folder you select.
 
-[Download v2.4.15](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.15) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
+[Download v2.4.16](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/tag/ChatGPT2.4.16) · [All releases](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases) · [Source code](https://github.com/kitomisaitichi-design/chatgpt-exporter/tree/main/ChatGPT-Exporter-English-Edge)
 
-**Viewer compatibility:** Exporter **2.4.15 remains interoperable with [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)**, including the new shared-content file layout. The current release is **1.1.27** (checked October 8, 2026); the download link follows the latest release. Select the complete backup root in the Viewer and open **Files & Library**.
+**Viewer compatibility:** Exporter **2.4.16 remains interoperable with [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)**, including the new shared-content file layout. The current release is **1.1.27** (checked October 8, 2026); the download link follows the latest release. Select the complete backup root in the Viewer and open **Files & Library**.
+
+## Local attachment write repair 2.4.16
+
+Short filenames, one compact-path retry, then a visible per-file skip after two local failures. Other files continue; remote attempts are unchanged. 194 tests and a real disk hash check pass. Original names and existing paths remain intact. Published as v2.4.16.
 
 ## Local file and storage repair in v2.4.15
 
