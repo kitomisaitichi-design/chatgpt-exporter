@@ -6,7 +6,7 @@ The Library limit uses decimal MB: **strictly less than 10,000,000 bytes**. Know
 
 Use **10 MB or larger** to filter the dashboard, or **Save manual-download list** for a portable HTML list. Open the listed Library folder/source chat, find the filename and ID, and download it through ChatGPT. The manual list also records unavailable and permission-limited files for inspection. It opens ChatGPT pages rather than retaining expiring signed download URLs. Scanning supports known Library nodes and the Library query route; an unfamiliar response, repeated page or early end is reported as incomplete.
 
-New saved files use `attachments/content/<sha256>/<first-name>`; legacy Library and chat paths remain readable. Local reuse searches permitted locations and prior indexes by native file ID or expected hash, verifies bytes, and supports renamed copies. Names and sizes alone do not prove identity. **Retry unavailable files** explicitly reopens unavailable/transient file work; known files at the size boundary remain manual.
+New saved files use `attachments/content/<sha256>/<compact-name>`; legacy Library and chat paths remain readable. Local reuse searches permitted locations and prior indexes by native file ID or expected hash, verifies bytes, and supports renamed copies. Names and sizes alone do not prove identity. **Retry unavailable files** explicitly reopens unavailable/transient file work; known files at the size boundary remain manual.
 
 | Output | Purpose |
 | --- | --- |
@@ -19,7 +19,7 @@ New saved files use `attachments/content/<sha256>/<first-name>`; legacy Library 
 
 Point your **kitomisaitichi-design/chatgpt-viewer** at the complete backup folder, keeping `conversation-index.json`, `json/`, `markdown/` and `attachments/` together. Existing native conversation JSON, branches, IDs, timestamps, classifications and basenames keep their format. The conversation index attaches Library files where a source conversation ID is available. Unlinked Library files stay in the file catalog; they are not invented conversations.
 
-The viewer can continue importing conversations through its existing index/native-JSON importer. The new `chatgpt-exporter-viewer/v1` and `chatgpt-library-index/v1` manifests expose Library metadata for its future file browser. This release updates the exporter; it does not add a new Library interface to the viewer application. Open the saved HTML catalog now to browse files locally. The cached-chat ZIP remains a transcript export; compress the full backup folder to include saved Library binaries.
+The Viewer imports native conversations and reads the versioned chatgpt-exporter-viewer/v1 and chatgpt-library-index/v1 catalogs. Use Files & Library for local browsing and manual downloaded-copy imports. This patch preserves those schemas; a fresh full import into the latest Viewer was not rerun. Historical integration checks used Viewer 1.1.6. The saved HTML catalogs also work independently. The cached-chat ZIP remains a transcript export; compress the full backup folder to include saved Library binaries.
 
 ## Activity controls
 

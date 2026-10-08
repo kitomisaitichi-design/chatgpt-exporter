@@ -1,3 +1,4 @@
+import {setupUpdates} from './update-ui.mjs';
 import {localStorageFailure,localStorageError} from './local-io.mjs';
 import {seedFileSources,observeChatFiles,sharedFileCandidates,sharedFileBudget,rememberFileResult,retryLinkedFile,fileReferences} from './file-links.mjs';
 import {ContentStore,validHash,isImage,applyImagePreference,contentHash,rememberVerifiedBlob} from './file-intelligence.mjs';
@@ -25,6 +26,7 @@ const getDashboardStats=createDashboardStats(),renderer=createRenderScheduler(pa
 function update(){renderer.request();}
 let job=null,scope=null,folder=null,root=null,attachmentLibrary=null,localAttachmentIndex=null,engine=null,running=false,tabId=null,connected=false,canEdit=true,notice='';
 let sensed={at:0,key:null,snapshots:[]},diskFiles=null,diskIndexEntries=null,passiveBusy=false,initializing=true;
+let installBusy=false;
 let connecting=false,starting=false,logPanel=null,libraryPanel=null,detecting=false,locations=[],backupInput=null,rootDetection=null,localSummary="Choose a folder to detect existing chats and file copies.";
 let detectionDepth=0;
 function beginDetection(){detectionDepth++;detecting=true;update();}
@@ -388,7 +390,7 @@ async function start(auto=false,observed=false) {
   }finally{starting=false;update();}
 }
 function download(blob,name) {const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
-function bind(id,handler) {$(id).addEventListener('click',()=>{notice='';Promise.resolve().then(handler).catch(error);});}
+function bind(id,handler) {$(id).addEventListener('click',()=>{if(installBusy)return;notice='';Promise.resolve().then(handler).catch(error);});}
 async function passiveTick(){
   if(!job || !scope || !connected || !job.schedule?.enabled || job.schedule.suspended)return;job.schedule.lastTickAt=Date.now();if(passiveBusy || running){update();return;}passiveBusy=true;
   try{
@@ -402,6 +404,7 @@ async function passiveTick(){
   }catch(e){job.message=`Passive watcher deferred: ${e.message || e}`;await db.put('jobs',scope.key,job).catch(()=>{});update();}finally{passiveBusy=false;}
 }
 async function init() {
+  await setupUpdates(document,chrome.runtime,VERSION,{db,isIdle:(own=false)=>canEdit&&!initializing&&!running&&(!starting||own)&&!detecting&&!connecting&&!passiveBusy&&job?.status!=='held',block:value=>{installBusy=value;starting=value;update();}});
   logPanel=new LogPanel(document,{download,onError:error});
   libraryPanel=new LibraryPanel(document,{onError:error,retry:async id=>{if(running || !canEdit || initializing)return;await ensureLibraryJob();if(!retryLinkedFile(job,job.library.entries[id] || Object.values(job.fileLinks?.sources || {}).find(f=>f.sourceKey===id || f.id===id)))return;await db.put('jobs',scope.key,job);await report(job);update();await start(false,true);}});
   bind('library-deduplicate',deduplicateFiles);
