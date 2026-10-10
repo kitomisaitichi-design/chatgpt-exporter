@@ -1,4 +1,4 @@
-export const VERSION = '2.4.18';
+export const VERSION = '2.4.19';
 // Persisted chat attachments can legitimately lack a native file ID or label.
 export const compareText = (a,b) => String(a ?? '').localeCompare(String(b ?? ''));
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -129,8 +129,10 @@ export function newJob(scope, options={}, now = Date.now()) {
   ], pace:freshPace(), events:[], recentDone:[], started:false,schedule:{enabled:merged.passive!==false,intervalMs:(Number(merged.passiveHours)||3)*3600000,nextScanAt:now+(Number(merged.passiveHours)||3)*3600000,lastScanAt:0,lastTelemetryAt:0}};
 }
 export function mergeEntry(job, item, project) {
+  if(job.viewerDeletes?.[item?.id]?.verified || job.entries?.[item?.id]?.remoteDeletedAt)return false;
   const id = item?.id || item?.conversation_id;
   if (!validId(id)) return false;
+  if(item.remote_deleted_at && item.deletion_verified){(job.viewerDeletes ||= {})[id]={at:item.remote_deleted_at,verified:true,contentHash:item.content_hash};job.entries[id]={...item,id,status:'viewer-deleted',remoteDeletedAt:item.remote_deleted_at,contentHash:item.content_hash};return true;}
   const prev = job.entries[id];
   const newer=prev?.update_time && item.update_time && epoch(item.update_time)>epoch(prev.update_time);
   const update_time=!prev?.update_time || newer ? item.update_time || prev?.update_time : prev.update_time;

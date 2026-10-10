@@ -1,6 +1,6 @@
 // Same-origin/read-only ChatGPT bridge. Authentication remains inside ChatGPT.
 (() => {
-  if (window.__englishExporterBridgeV2412) return;
+  if (window.__englishExporterBridgeV2419) return;
   const originalFetch = window.fetch.bind(window);
   const captured = new Map(), hints = new Map(), projects = new Map(), fileRoutes=new Map(), preparedAssets=new Map(), changedChats=new Map(), libraryItems=new Map(),libraryRoutes=new Map();
   const documentId=crypto.randomUUID(), loadedAt=Date.now();
@@ -56,16 +56,18 @@
     let url;try { url = new URL(typeof resource === 'string' || resource instanceof URL ? resource : resource.url, location.href); } catch {}
     const internal = url?.origin === location.origin && url.pathname.startsWith('/backend-api/');
     if (internal) {try {const headers = new Headers(resource instanceof Request ? resource.headers : undefined);new Headers(options?.headers).forEach((v,k) => headers.set(k,v));const auth = headers.get('authorization');if (auth?.startsWith('Bearer ') && auth !== 'Bearer dummy') token = auth.slice(7);if (headers.has('chatgpt-account-id')){accountHeader = headers.get('chatgpt-account-id');accountHeaderSelector=cookie('_account');}if (headers.has('oai-device-id')) device = headers.get('oai-device-id');if (headers.has('x-oai-is-pending-updates')) pending = headers.get('x-oai-is-pending-updates');for(const name of ['oai-did','originator','x-openai-web-frontend','x-openai-codex-window-type','x-oai-mcp-form-version']){const value=headers.get(name);if(value && value.length<=200 && !/[\r\n]/.test(value))frontendHeaders.set(name,value);}} catch {}}
-    const scope = snapshotScope(),write=!['GET','HEAD'].includes(String(options?.method || (resource instanceof Request?resource.method:'GET')).toUpperCase());
-    const conversationWrite=internal && write && /^\/backend-api\/(?:f\/)?conversation(?:\/[a-zA-Z0-9_-]+)?$/.test(url.pathname);
+    const scope = snapshotScope(),method=String(options?.method || (resource instanceof Request?resource.method:'GET')).toUpperCase(),write=!['GET','HEAD'].includes(method);
+    // PATCH/DELETE requests update titles, visibility and other metadata.
+    // Only a reply-producing POST can announce a completed ChatGPT reply.
+    const conversationWrite=internal && method==='POST' && /^\/backend-api\/(?:f\/)?conversation(?:\/[a-zA-Z0-9_-]+)?$/.test(url.pathname);
     const historyRead=internal && !write && (/^\/backend-api\/conversations(?:\/search)?\/?$/.test(url.pathname) || /^\/backend-api\/conversation\/[a-zA-Z0-9_-]+$/.test(url.pathname) || /^\/backend-api\/gizmos\/[^/]+\/conversations$/.test(url.pathname) || url.pathname==='/backend-api/gizmos/snorlax/sidebar' || /\/files\/download\//.test(url.pathname) || /\/interpreter\/download$/.test(url.pathname));
     let requestSeq=0;const relevant=conversationWrite || historyRead;if(relevant){lastStart=Date.now();if(write)lastWrite=lastStart;inFlight++;requestSeq=++seq;events.push({seq:requestSeq,at:lastStart,write});events=events.filter(e=>Date.now()-e.at<300000).slice(-1000);}
     try {
       const response = await originalFetch(resource, options);if (internal) void observe(response, url, scope);
       if(conversationWrite && response.ok){
-        const writeSeq=requestSeq;let conversationId=url.pathname.match(/\/conversation\/([a-zA-Z0-9_-]+)$/)?.[1] || null;
+        const writeSeq=requestSeq,originatingChatId=location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/)?.[1];let conversationId=url.pathname.match(/\/conversation\/([a-zA-Z0-9_-]+)$/)?.[1] || null;
         try{const raw=options?.body || (resource instanceof Request?await resource.clone().text():null);if(typeof raw==='string')conversationId=JSON.parse(raw).conversation_id || conversationId;}catch{}
-        const completed=()=>{const id=conversationId || location.pathname.match(/\/c\/([a-zA-Z0-9_-]+)/)?.[1];if(typeof id!=='string' || !/^[a-zA-Z0-9_-]{8,160}$/.test(id))return;const at=Date.now();changedChats.set(id,{id,at,revision:`${documentId}:${writeSeq}`,scope});hint({id},scope,'completed ChatGPT reply');while(changedChats.size>500)changedChats.delete(changedChats.keys().next().value);};
+        const completed=()=>{const id=conversationId || originatingChatId;if(typeof id!=='string' || !/^[a-zA-Z0-9_-]{8,160}$/.test(id))return;const at=Date.now();changedChats.set(id,{id,at,revision:`${documentId}:${writeSeq}`,scope});hint({id},scope,'completed ChatGPT reply');while(changedChats.size>500)changedChats.delete(changedChats.keys().next().value);};
         if(response.headers.get('content-type')?.includes('text/event-stream') && response.body){
           activeStreams++;const reader=response.clone().body.getReader(),decoder=new TextDecoder();let carry='';
           void (async()=>{try{for(;;){const part=await reader.read();if(part.done)break;if(!conversationId){carry=(carry+decoder.decode(part.value,{stream:true})).slice(-65536);const match=carry.match(/"conversation_id"\s*:\s*"([a-zA-Z0-9_-]{8,160})"/);if(match)conversationId=match[1];}}}catch{}finally{activeStreams--;lastWrite=Date.now();reader.releaseLock();completed();}})();
@@ -153,13 +155,22 @@
         if(!(response.headers.get('content-type') || '').includes('json'))return {ok:false,status:403,error:'Open the Library in ChatGPT and finish sign-in or browser verification.'};
         const observed=response.clone(),data=await response.json();if(!matches(args.scope))return {ok:false,status:409,error:'Workspace changed during Library discovery.'};void observe(observed,new URL(path,location.origin),args.scope).catch(()=>{});return {ok:true,status:200,data};
       }
+      if(args.op==='viewerDelete'){
+        if(!/^[a-zA-Z0-9_-]{8,160}$/.test(args.id||''))return {ok:false,status:400,error:'Invalid conversation ID'};
+        if(lastLimit&&lastLimit.at>(args.lastLimitSeen||0))return {ok:false,status:429,retryAfter:lastLimit.retryAfter,observedAt:lastLimit.at};
+        const response=await originalFetch('/backend-api/conversation/'+encodeURIComponent(args.id),{method:'PATCH',credentials:'include',headers:{...authHeaders(args.scope),accept:'application/json','content-type':'application/json'},body:JSON.stringify({is_visible:false}),signal:AbortSignal.timeout(60000)});
+        if(response.status===401){token=null;sessionAt=0;}
+        if(!matches(args.scope))return {ok:false,status:409,error:'Workspace changed during deletion'};
+        return {ok:response.ok,status:response.status,retryAfter:response.headers.get('retry-after')};
+      }
       if (args.op !== 'get' || !allowed(args.path)) return {ok:false,status:400,error:'Unsupported request'};
       if (lastLimit && lastLimit.at > (args.lastLimitSeen || 0)) return {ok:false,status:429,retryAfter:lastLimit.retryAfter,observedAt:lastLimit.at};
       const response = await originalFetch(args.path, {method:'GET', credentials:'include',headers:{...authHeaders(args.scope),accept:'application/json'},signal:AbortSignal.timeout(60000)});if (response.status === 401) {token = null; sessionAt = 0;}if (!response.ok) return {ok:false,status:response.status,retryAfter:response.headers.get('retry-after')};if (!(response.headers.get('content-type') || '').includes('json')) return {ok:false,status:403,kind:'challenge',error:'A web page was returned instead of conversation data. Open ChatGPT to check sign-in or browser verification, then resume.'};
       const data = await response.json();if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'Workspace changed during the request.'};return {ok:true,status:200,data};
     } catch (error) {return {ok:false,status:error.status || 0,retryAfter:error.retryAfter,error:error.status ? error.message : 'Connection interrupted or request timed out.'};}
   }
-  Object.defineProperty(window,'__englishExporterBridgeV2412',{value:{rpc,version:'2.4.12'}, configurable:false,writable:false});
+  Object.defineProperty(window,'__englishExporterBridgeV2419',{value:{rpc,version:'2.4.19'}, configurable:false,writable:false});
+  if(!window.__englishExporterBridgeV2412)Object.defineProperty(window,'__englishExporterBridgeV2412',{value:window.__englishExporterBridgeV2419});
   if(!window.__englishExporterBridgeV2411)Object.defineProperty(window,'__englishExporterBridgeV2411',{value:window.__englishExporterBridgeV2412});
   if(!window.__englishExporterBridgeV2410)Object.defineProperty(window,'__englishExporterBridgeV2410',{value:window.__englishExporterBridgeV2412});
   if(!window.__englishExporterBridgeV249)Object.defineProperty(window,'__englishExporterBridgeV249',{value:window.__englishExporterBridgeV2412});

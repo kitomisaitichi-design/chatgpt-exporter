@@ -1,3 +1,6 @@
+import {own as ownViewerQueue} from './viewer-owner.mjs';
+import * as viewerRunner from './viewer-runner.mjs';
+import * as viewerQueue from './viewer-delete-adapter.mjs';
 import {setupUpdates} from './update-ui.mjs';
 import {localStorageFailure,localStorageError} from './local-io.mjs';
 import {seedFileSources,observeChatFiles,sharedFileCandidates,sharedFileBudget,rememberFileResult,retryLinkedFile,fileReferences} from './file-links.mjs';
@@ -20,6 +23,7 @@ import {createRenderScheduler} from './ui-scheduler.mjs';
 import {createDashboardStats} from './dashboard-state.mjs';
 import {setUserYield,userYieldStatus} from './live-settings.mjs';
 import {resolveBackupFolder,scanTranscriptInventory,readDetectedTranscript,mergeFolderMetadata} from './local-detection.mjs';
+import {conversationRevisionText} from './conversation-revision.mjs';
 import {iterateLocalCopyCandidates,verifyLocalCopy} from './local-files.mjs';
 const $=id=>document.getElementById(id);
 const getDashboardStats=createDashboardStats(),renderer=createRenderScheduler(paint);
@@ -34,6 +38,7 @@ function endDetection(){detectionDepth=Math.max(0,detectionDepth-1);detecting=de
 const harvested=new Map(),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const digest=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(b=>b.toString(16).padStart(2,'0')).join('');
 const hashData=data=>digest(JSON.stringify(data));
+const revisionHash=data=>digest(conversationRevisionText(data));
 function error(e) {notice=e.message || String(e);$('message').textContent=notice;}
 function paint() {
   const {c,unavailable,unverified,deferred,queued,provenance}=getDashboardStats(job);$('saved').textContent=c.saved;$('found').textContent=c.total;$('failed').textContent=c.failed+c.discovery-(job?.sources?.filter(s=>!s.done && !s.error).length || 0);$('changed').textContent=c.changed;$('attachments-count').textContent=c.attachments;
@@ -64,7 +69,7 @@ function paint() {
 async function bridge(args,targetId=tabId) {
   if (!targetId) throw new Paused('Connect to ChatGPT first.');
   let timer;let results;
-  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV2412) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV2412.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
+  try{results=await Promise.race([chrome.scripting.executeScript({target:{tabId:targetId},world:'MAIN',func:async args=>{if (!window.__englishExporterBridgeV2419) return {ok:false,status:0,kind:'bridge',error:'ChatGPT is still loading.'};return window.__englishExporterBridgeV2419.rpc(args);},args:[args]}),new Promise(resolve=>{timer=setTimeout(()=>resolve([{result:{ok:false,status:504,error:'The ChatGPT bridge timed out; this item can be deferred.'}}]),100000);})]);}finally{clearTimeout(timer);}
   return results[0]?.result || {ok:false,status:0,kind:'bridge'};
 }
 async function sense(expected) {
@@ -81,11 +86,15 @@ async function sense(expected) {
           const harvestKey=`${tab.id}:${result.documentId}:${entry.id}`;if(harvested.get(harvestKey)===entry.at)continue;
           const cached=await bridge({op:'cached',id:entry.id,scope:expected},tab.id);
           if(cached.ok && conversationValid(cached.data,entry.id)){
-            const key=`${expected.key}:${entry.id}`,old=await db.get('chats',key),hash=await hashData(cached.data);
-            let oldHash=old?.hash || (old?.data?await hashData(old.data):null) || job?.entries?.[entry.id]?.contentHash || null;
-            if(!oldHash && root){const disk=await diskRead(entry.id);oldHash=disk?.hash || null;if(oldHash && job?.entries?.[entry.id])job.entries[entry.id].contentHash=oldHash;}
+            const key=`${expected.key}:${entry.id}`,old=await db.get('chats',key),hash=await hashData(cached.data),bodyRevision=await revisionHash(cached.data),saved=job?.entries?.[entry.id];
+            let oldHash=old?.hash || (old?.data?await hashData(old.data):null) || saved?.contentHash || null;
+            if(!oldHash && root){const disk=await diskRead(entry.id);oldHash=disk?.hash || null;if(oldHash && saved)saved.contentHash=oldHash;}
+            let previousRevision=saved?.revisionHash || null;
+            if(!previousRevision && saved?.contentHash && old?.data && (old?.hash || await hashData(old.data))===saved.contentHash)previousRevision=await revisionHash(old.data);
+            if(!previousRevision && saved?.contentHash && root){const disk=await diskRead(entry.id);if(disk?.hash===saved.contentHash)previousRevision=await revisionHash(disk.data);}
+            if(previousRevision && saved && !saved.revisionHash)saved.revisionHash=previousRevision;
             const fresh=!old || cached.at>old.at && epoch(cached.data.update_time)>=epoch(old.data?.update_time);
-            if(fresh && oldHash && oldHash!==hash)result.changedBodies.push({id:entry.id,title:cached.data.title,update_time:cached.data.update_time,create_time:cached.data.create_time || conversationTime(cached.data),contentHash:hash,previousContentHash:oldHash,origin:'passively observed changed chat'});
+            if(fresh && oldHash && oldHash!==hash && (!previousRevision || previousRevision!==bodyRevision))result.changedBodies.push({id:entry.id,title:cached.data.title,update_time:cached.data.update_time,create_time:cached.data.create_time || conversationTime(cached.data),contentHash:hash,revisionHash:bodyRevision,previousContentHash:oldHash,origin:'passively observed changed chat'});
             if(fresh)await db.put('chats',key,{data:cached.data,at:cached.at,hash,passive:true});harvested.set(harvestKey,entry.at);
           }
         }
@@ -95,8 +104,8 @@ async function sense(expected) {
   }
   sensed={at:Date.now(),key:expected.key,snapshots};return snapshots;
 }
-async function readyBridge() {
-  for (let n=0;n<60;n++) {try {const result=await bridge({op:'context'});if (result.ok) return result;if(result.kind==='bridge')await chrome.scripting.executeScript({target:{tabId},world:'MAIN',files:['bridge.js']});if (result.status && result.status!==0) throw new Paused(result.error || `ChatGPT session returned HTTP ${result.status}. Open the connected tab, sign in, then click Connect again.`);} catch (e) {if (e instanceof Paused) throw e;}await sleep(1000);}throw new Paused('ChatGPT did not finish loading. Sign in in the connected tab, then click Connect again.');
+async function readyBridge(attempts=60) {
+  for (let n=0;n<attempts;n++) {try {const result=await bridge({op:'context'});if (result.ok) return result;if(result.kind==='bridge')await chrome.scripting.executeScript({target:{tabId},world:'MAIN',files:['bridge.js']});if (result.status && result.status!==0) throw new Paused(result.error || `ChatGPT session returned HTTP ${result.status}. Open the connected tab, sign in, then click Connect again.`);} catch (e) {if (e instanceof Paused) throw e;}await sleep(1000);}throw new Paused('ChatGPT did not finish loading. Sign in in the connected tab, then click Connect again.');
 }
 async function ensureTab() {if (tabId) {try {const tab=await chrome.tabs.get(tabId);if (tab.url?.startsWith('https://chatgpt.com/')) return;} catch {}}const tab=await chrome.tabs.create({url:'https://chatgpt.com/',active:false});tabId=tab.id;await chrome.storage.session.set({exporterTabId:tabId});}
 function applyJobOptionsToUI(){if(!job)return;for (const id of ['archived','projects','assist','verify','attachments','passive']) $(id).checked=job.options[id]!==false;$('yield-user').checked=job.options.yieldUser!==false;$('library-enabled').checked=job.options.library!==false;$('download-images').checked=job.options.downloadImages!==false;$('smart-watch').checked=job.options.smartWatch!==false;$('work-mode').value=job.options.mode || 'index-first';$('passive-hours').value=String(job.options.passiveHours || Math.round((job.schedule?.intervalMs || 10800000)/3600000) || 3);$('recent-check-minutes').value=String(Math.round((job.schedule?.recentIntervalMs || 300000)/60000));}
@@ -172,8 +181,8 @@ function migrateLoadedJob(j){
   if(j.version!==VERSION){const recovered=recoverLocalFileFailures(j,now);if(recovered)appendEvent(j,`Recovered ${recovered} file records charged only for missing local filesystem entries; remote failure budgets retained.`,now,'info','files');ensureWatchSchedule(j,now);j.version=VERSION;changed=true;}
   return changed;
 }
-async function connect(expectedKey=null) {
-  $('message').textContent='Connecting to your signed-in ChatGPT session…';await ensureTab();const result=await readyBridge(),nextScope={...result.scope,key:await digest(JSON.stringify([result.scope.user,result.scope.account || null]))};
+async function connect(expectedKey=null,viewerMode=false) {
+  $('message').textContent='Connecting to your signed-in ChatGPT session…';await ensureTab();const result=await readyBridge(viewerMode?1:60),nextScope={...result.scope,key:await digest(JSON.stringify([result.scope.user,result.scope.account || null]))};
   if (expectedKey && nextScope.key!==expectedKey) throw new Paused('The account or workspace changed. Automatic resume stopped; reconnect to the original workspace.');await resetLocalIndex();scope=nextScope;connected=true;await db.put('meta','lastScope',scope);job=await db.get('jobs',scope.key) || null;if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`) || null;attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;root=null;rootDetection=null;backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;sensed.at=0;applyJobOptionsToUI();update();if (!job) $('message').textContent='Connected. Choose a folder, then start the automatic export.';
 }
 async function rememberLocation(handle,role){
@@ -208,7 +217,7 @@ function reportData(j) {
   return {exporter:`English Autopilot ${VERSION}`,generated_at:new Date().toISOString(),scope:j.scope,status:j.status,message:j.message,counts:counts(j),schedule:j.schedule || null,pacing:{delay_ms:j.pace.delay,tier:j.pace.tier || 0,cooldown_until:j.pace.until,last_limit:j.pace.lastLimit,strikes:j.pace.strikes,regimes:j.pace.regimes || [],native_requests_observed:j.awareness?.native?.length || 0,exporter_actions_observed:j.awareness?.actions?.length || 0},recent_responses:j.responses || [],awareness:j.awareness?{state:j.awareness.state,reason:j.awareness.reason,pressure:j.awareness.pressure}:null,discoveryAudit:j.discoveryAudit,discoveryUncertain:!!j.discoveryUncertain,discovery:j.sources.map(({seenPages,uniqueIds,...s})=>({...s,uniqueCount:uniqueIds?.length || 0})),conversations:Object.values(j.entries),note:'Complete means all discovered conversations were saved and enabled discovery sources reached their end. v2.3.4 records content fingerprints and overwrites the same transcript files when a changed body is observed or a newer server update is retrieved. Eligible attachment files are matched against permitted local folders first; only missing files attempt a current/observed ChatGPT route. Hard unavailable attachments are not auto-retried. Hard chat 400/404/410/412/422 results are parked for 7 days unless a newer server update appears. User interaction in ChatGPT yields network work for 6 minutes when enabled.'};
 }
 function indexData(j) { const fileMap=libraryFileMap(j);
-  return {schema:'chatgpt-conversation-index/v1',library_index:'attachments/library-index.json',viewer_handoff:'viewer-handoff.json',version:VERSION,generated_at:new Date().toISOString(),scope:j.scope.key,total:Object.keys(j.entries).length,order:'calendar create time (earliest known conversation/message time)',entries:Object.values(j.entries).sort((a,b)=>(epoch(a.create_time)||epoch(a.update_time)||Infinity)-(epoch(b.create_time)||epoch(b.update_time)||Infinity)).map(e=>({id:e.id,url:`https://chatgpt.com/c/${e.id}`,title:e.title,status:e.status,create_time:e.create_time || null,update_time:e.update_time,checked_update_time:e.checkedUpdateTime || null,chat_kind:e.chatKind || (e.projectId?'project-chat':'unknown'),chat_kind_evidence:e.chatKindEvidence || null,project:e.project || null,found_via:e.foundVia || [],saved_at:e.savedAt || null,content_hash:e.contentHash || null,previous_content_hash:e.previousContentHash || null,revision_count:e.revisionCount || 0,changed_at:e.changedAt || null,json:e.basename?`json/${e.basename}.json`:null,markdown:e.basename?`markdown/${e.basename}.md`:null,attachments:conversationFiles(j,e,fileMap),attachment_state_revision:e.attachmentStateRevision || 0,attachment_scanned_at:e.attachmentScannedAt || null,attachment_pending:!!e.attachmentPending,attachment_retry_at:e.attachmentRetryAt || 0,error:e.error || null,last_failure_at:e.lastFailureAt || null,last_failure_status:e.lastFailureStatus || null,broken_until:e.brokenUntil || 0}))};
+  return {schema:'chatgpt-conversation-index/v1',library_index:'attachments/library-index.json',viewer_handoff:'viewer-handoff.json',version:VERSION,generated_at:new Date().toISOString(),scope:j.scope.key,total:Object.keys(j.entries).length,order:'calendar create time (earliest known conversation/message time)',entries:Object.values(j.entries).sort((a,b)=>(epoch(a.create_time)||epoch(a.update_time)||Infinity)-(epoch(b.create_time)||epoch(b.update_time)||Infinity)).map(e=>({id:e.id,url:`https://chatgpt.com/c/${e.id}`,title:e.title,status:e.status,create_time:e.create_time || null,update_time:e.update_time,checked_update_time:e.checkedUpdateTime || null,chat_kind:e.chatKind || (e.projectId?'project-chat':'unknown'),chat_kind_evidence:e.chatKindEvidence || null,project:e.project || null,found_via:e.foundVia || [],saved_at:e.savedAt || null,content_hash:e.contentHash || null,revision_hash:e.revisionHash || null,remote_deleted_at:e.remoteDeletedAt || null,deletion_verified:!!j.viewerDeletes?.[e.id]?.verified,previous_content_hash:e.previousContentHash || null,revision_count:e.revisionCount || 0,changed_at:e.changedAt || null,json:e.basename?`json/${e.basename}.json`:null,markdown:e.basename?`markdown/${e.basename}.md`:null,attachments:conversationFiles(j,e,fileMap),attachment_state_revision:e.attachmentStateRevision || 0,attachment_scanned_at:e.attachmentScannedAt || null,attachment_pending:!!e.attachmentPending,attachment_retry_at:e.attachmentRetryAt || 0,error:e.error || null,last_failure_at:e.lastFailureAt || null,last_failure_status:e.lastFailureStatus || null,broken_until:e.brokenUntil || 0}))};
 }
 let diskScanStats={},diskKnownCount=-1;
 async function diskInventory() {
@@ -385,7 +394,7 @@ async function start(auto=false,observed=false) {
     enterWatching(job);await db.put('jobs',scope.key,job);update();return;
   }
   if(!observed && !hasReadyWork(job) && !watchCheckDue(job) && ['complete','incomplete','indexed','watching'].includes(job.status)){if(job.status==='watching')job.status=job.lastRunStatus || 'complete';await db.put('jobs',scope.key,job);update();return;}
-  running=true;update();engine=new Engine(job,{save:j=>db.put('jobs',scope.key,j),changed:update,request:async(path,expected,lastLimitSeen)=>{try {return await bridge({op:'get',path,scope:expected,lastLimitSeen});}catch {throw new Paused('The connected ChatGPT tab closed or navigated away. Click Connect, then resume.');}},refresh:async()=>{const r=await bridge({op:'context'});if (!r.ok) throw new Paused(r.error || 'Please sign in to ChatGPT again.');},cacheGet:key=>db.get('chats',key),cachePut:(key,value)=>db.put('chats',key,value),inventory:async s=>[...await db.cacheInventory(s.key),...await diskInventory()],diskRead,sense,write,report:engineReport,index,recover,hash:hashData,attachments:backupAttachments,libraryList:(source,expected)=>bridge({op:'libraryList',source,scope:expected,lastLimitSeen:job.lastLimitSeen || 0}),libraryDownload:downloadLibraryFile,libraryVerify:verifyLibraryFile,maintenance:maintenanceTurn,libraryLimit:e=>{limited(job.pace,e.retryAfter);recordLimit(job);},online:()=>navigator.onLine});
+  running=true;update();engine=new Engine(job,{save:j=>db.put('jobs',scope.key,j),changed:update,request:async(path,expected,lastLimitSeen)=>{try {return await bridge({op:'get',path,scope:expected,lastLimitSeen});}catch {throw new Paused('The connected ChatGPT tab closed or navigated away. Click Connect, then resume.');}},refresh:async()=>{const r=await bridge({op:'context'});if (!r.ok) throw new Paused(r.error || 'Please sign in to ChatGPT again.');},cacheGet:key=>db.get('chats',key),cachePut:(key,value)=>db.put('chats',key,value),inventory:async s=>[...await db.cacheInventory(s.key),...await diskInventory()],diskRead,sense,write,report:engineReport,index,recover,hash:hashData,revisionHash,attachments:backupAttachments,libraryList:(source,expected)=>bridge({op:'libraryList',source,scope:expected,lastLimitSeen:job.lastLimitSeen || 0}),libraryDownload:downloadLibraryFile,libraryVerify:verifyLibraryFile,viewerQueue:async e=>{try{return await viewerQueue.turn(e,{root,bridge,write,index});}catch(error){if(error.connection)connected=false;throw error;}},maintenance:maintenanceTurn,libraryLimit:e=>{limited(job.pace,e.retryAfter);recordLimit(job);},online:()=>navigator.onLine});
   try {await engine.run();if(opts.passive && !job.schedule.suspended && ['complete','incomplete','indexed'].includes(job.status)){enterWatching(job);await db.put('jobs',scope.key,job);await report(job);}} finally {await localFiles.flush();await flushMaintenance();running=false;if(job && root)await libraryReport(job);update();}
   }finally{starting=false;update();}
 }
@@ -404,7 +413,7 @@ async function passiveTick(){
   }catch(e){job.message=`Passive watcher deferred: ${e.message || e}`;await db.put('jobs',scope.key,job).catch(()=>{});update();}finally{passiveBusy=false;}
 }
 async function init() {
-  await setupUpdates(document,chrome.runtime,VERSION,{db,isIdle:(own=false)=>canEdit&&!initializing&&!running&&(!starting||own)&&!detecting&&!connecting&&!passiveBusy&&job?.status!=='held',block:value=>{installBusy=value;starting=value;update();}});
+  await setupUpdates(document,chrome.runtime,VERSION,{db,isIdle:(own=false)=>canEdit&&!initializing&&!running&&(!starting||own)&&!detecting&&!connecting&&!passiveBusy&&!viewerBusy&&job?.status!=='held',block:value=>{installBusy=value;starting=value;update();}});
   logPanel=new LogPanel(document,{download,onError:error});
   libraryPanel=new LibraryPanel(document,{onError:error,retry:async id=>{if(running || !canEdit || initializing)return;await ensureLibraryJob();if(!retryLinkedFile(job,job.library.entries[id] || Object.values(job.fileLinks?.sources || {}).find(f=>f.sourceKey===id || f.id===id)))return;await db.put('jobs',scope.key,job);await report(job);update();await start(false,true);}});
   bind('library-deduplicate',deduplicateFiles);
@@ -415,7 +424,7 @@ async function init() {
 
   addEventListener('online',()=>{if(job?.schedule){job.schedule.checkError=null;job.schedule.checkWaitUntil=0;}void passiveTick();});
   update();
-  bind('connect',async()=>{connecting=true;update();try{await connect();}finally{connecting=false;update();}});
+  bind('connect',async()=>{connecting=true;update();try{await connect();await db.put('meta',`viewerConnection:${scope.key}`,{attempts:0,blocked:false,nonce:(await viewerQueue.readQueue(folder,'.viewer-queue/reconnect.json'))?.nonce||'',authenticatedAt:Date.now()/1000});}finally{connecting=false;update();}});
   bind('folder',async()=>{
     if(!scope)throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker(pickerOptions('backup')),previous=root || folder;
     beginDetection();try{
@@ -447,7 +456,52 @@ async function init() {
   for(const id of ['passive','passive-hours','recent-check-minutes','attachments','download-images','library-enabled','smart-watch'])$(id).addEventListener('change',async()=>{if(!job)return;job.options.downloadImages=$('download-images').checked;if(id==='download-images')applyImagePreference(job);if(id==='download-images'&&job.options.downloadImages)for(const e of Object.values(job.entries || {}))if(e.status==='saved'){e.attachmentPending=true;e.attachmentRetryAt=0;e.attachmentScannedAt=0;}job.options.library=$('library-enabled').checked;job.options.smartWatch=$('smart-watch').checked;job.options.passive=$('passive').checked;job.options.passiveHours=Number($('passive-hours').value)||3;job.options.attachments=$('attachments').checked;job.options.yieldUser=$('yield-user').checked;job.schedule ||= newJob(scope,job.options).schedule;job.schedule.enabled=job.options.passive;if(id==='passive')job.schedule.suspended=!job.options.passive;job.schedule.intervalMs=job.options.passiveHours*3600000;if(id==='passive-hours' || id==='passive' && job.options.passive)job.schedule.nextScanAt=Date.now()+job.schedule.intervalMs;if(id==='recent-check-minutes'){job.schedule.recentIntervalMs=Number($('recent-check-minutes').value)*60000;job.schedule.nextCheckAt=Date.now();}job.updated=Date.now();update();try{await db.put('jobs',scope.key,job);if(root)await report(job);}catch(e){error(e);}update();});
   $('yield-user').addEventListener('change',()=>{if(!job){update();return;}job.message=setUserYield(job,$('yield-user').checked);engine?.wake?.();update();void db.put('jobs',scope.key,job).catch(error);});
   tabId=(await chrome.storage.session.get('exporterTabId')).exporterTabId;scope=await db.get('meta','lastScope');if (scope) {job=await db.get('jobs',scope.key);if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`);attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;}initializing=false;applyJobOptionsToUI();update();setInterval(update,1000);setInterval(passiveTick,60000);chrome.runtime.onMessage.addListener(msg=>{if(msg?.type==='passive-tick')void passiveTick();});
-  if (job?.status==='running' || job?.status==='watching' && job.schedule?.enabled && !job.schedule.suspended) {try {running=true;const restoring=engine={stopped:false};if(restoring.stopped)throw new Paused('Paused by you.');await connect(scope.key);if(restoring.stopped)throw new Paused('Paused by you.');running=false;await start(true);} catch(e){if(job){job.status='paused';job.message=`Saved progress found. ${e.message}`;await db.put('jobs',scope.key,job);}}finally{running=false;update();}}
+  if (!new URLSearchParams(location.search).has('viewerQueue') && (job?.status==='running' || job?.status==='watching' && job.schedule?.enabled && !job.schedule.suspended)) {try {running=true;const restoring=engine={stopped:false};if(restoring.stopped)throw new Paused('Paused by you.');await connect(scope.key);if(restoring.stopped)throw new Paused('Paused by you.');running=false;await start(true);} catch(e){if(job){job.status='paused';job.message=`Saved progress found. ${e.message}`;await db.put('jobs',scope.key,job);}}finally{running=false;update();}}
   else if (job?.status==='pausing' || job?.status==='held') {job.status='paused';job.message='The previous live hold/run is no longer in memory, but its exact queue/cursors are preserved. Click Connect, then resume; no scan reset is performed.';await db.put('jobs',scope.key,job);update();}
 }
-navigator.locks.request('english-exporter-dashboard',{ifAvailable:true},async lock=>{if(!lock){canEdit=false;update();$('message').textContent='Another exporter tab is already open. Continue there, or close it and reload this tab.';return;}await init();await new Promise(()=>{});}).catch(error);
+ownViewerQueue({locks:navigator.locks,ready:async()=>{canEdit=true;await init();},blocked:()=>{canEdit=false;update();$('message').textContent='Another exporter page owns this account. This page will take over when it closes.';},error});
+
+// Viewer queue adapter v2: one owner, no full inventory scan before remote commands.
+let viewerBusy=false,viewerAuthAt=0;
+async function viewerTick(){
+ if(viewerBusy||!canEdit||initializing||starting||detecting||connecting||!job?.scope||!folder)return;
+ viewerBusy=true;
+ try{
+  if(await folder.queryPermission({mode:'readwrite'})!=='granted')return;
+  // Queue lookup must not pretend the export root/metadata has been resolved.
+  let queueRoot=root||folder;
+  const reset=await viewerQueue.readQueue(queueRoot,'.viewer-queue/reconnect.json');
+  let state=await db.get('meta',`viewerConnection:${job.scope.key}`)||{};
+  const reconnect=state.nonce!==(reset?.nonce||'');
+  if(reconnect){connected=false;viewerAuthAt=0;}
+  if(!connected){
+   if(running)return;
+   if(!await viewerQueue.pending(queueRoot,job.scope.key)&&!reconnect)return;
+   const expected=job.scope.key;
+   connected=await viewerRunner.connectionState({db,root:queueRoot,scope:job.scope,connect:()=>connect(expected,true),write,sleep});
+   queueRoot=root||folder;state=await db.get('meta',`viewerConnection:${expected}`)||{};
+   if(!connected){await viewerQueue.heartbeat({root:queueRoot,job,canEdit,connected:false,write,connection:state});return;}
+   viewerAuthAt=Date.now();
+  }
+  if(!running&&Date.now()-viewerAuthAt>30000){
+   const context=await bridge({op:'context'});
+   const key=context.ok?await digest(JSON.stringify([context.scope.user,context.scope.account||null])):null;
+   if(!context.ok||key!==job.scope.key){connected=false;viewerAuthAt=0;await viewerQueue.heartbeat({root:queueRoot,job,canEdit,connected:false,write,connection:{error:context.error||'Sign in to the original account/workspace'}});return;}
+   viewerAuthAt=Date.now();
+  }
+  await viewerQueue.heartbeat({root:queueRoot,job,canEdit,connected,write,connection:state});
+  queueRoot=root||folder;
+  const browserPending=await viewerQueue.transportHeartbeat({job},{root:queueRoot,bridge,write,index});
+  if(running)return;
+  if(!browserPending&&!await viewerQueue.pending(queueRoot,job.scope.key))return;
+  running=true;update();
+  try{
+   const queueBridge=async args=>{try{return await bridge(args);}catch(error){error.connection=true;error.name='Paused';throw error;}};
+   await viewerRunner.drain(Engine,job,{save:j=>db.put('jobs',scope.key,j),changed:update,sense,connection:()=>db.get('meta',`viewerConnection:${job.scope.key}`),online:()=>navigator.onLine,refresh:async()=>{const r=await queueBridge({op:'context'});const key=r.ok?await digest(JSON.stringify([r.scope.user,r.scope.account||null])):null;if(!r.ok||key!==job.scope.key){const e=Error(r.error||'Reconnect to the original ChatGPT account');e.connection=true;e.name='Paused';throw e;}}},{root:queueRoot,bridge:queueBridge,write,index});
+  }catch(e){if(e.connection)connected=false;notice='Viewer queue: '+e.message;}
+  finally{running=false;update();}
+ }catch(e){notice='Viewer queue: '+e.message;update();}
+ finally{viewerBusy=false;}
+}
+setInterval(()=>void viewerTick(),5000);
+void viewerTick();

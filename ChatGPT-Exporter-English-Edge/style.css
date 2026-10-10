@@ -12,3 +12,24 @@
 
 /* Keep release actions readable and consistently spaced at every sidebar width. */
 #extension-updates{display:grid;gap:12px}#extension-updates .section-title{margin-bottom:4px}#extension-updates .field-label{margin-bottom:0}#extension-updates>p{margin:0;overflow-wrap:anywhere}#extension-updates>p:has(a[hidden]){display:none}#extension-updates .check-row{align-items:center;font-size:12px}#extension-updates .check-row input{margin:0}#extension-updates details{margin-top:0;padding-top:12px}#extension-updates details small{margin-top:10px}
+
+/* Independent flowing columns keep Library and Activity immediately under
+   the watcher; a tall tools sidebar cannot strand blank rows mid-page. */
+.workspace>.main-column,.workspace>.side-column{align-content:start}
+.tools{position:relative;overflow:hidden;background:radial-gradient(circle at 96% 0%,#92d9b212,transparent 48%),linear-gradient(155deg,#1e2c2b,#171e22 66%);border-color:#38524b}
+.tools .section-title{position:relative;margin-bottom:16px}
+.tools .section-title h2{letter-spacing:-.35px}
+.tools-deco{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border:1px solid #487265;border-radius:11px;background:#9fe6c810;color:#a5e4c9;font-size:19px;box-shadow:inset 0 0 16px #9fe6c809}
+.tools .tool-buttons{display:grid;grid-template-columns:minmax(0,1fr);gap:9px}
+.tools .tool-buttons button{display:grid;grid-template-columns:34px minmax(0,1fr) 16px;gap:11px;align-items:center;text-align:left;min-height:57px;padding:10px 12px;border:1px solid #344e47;border-radius:10px;background:linear-gradient(105deg,#243831b3,#1b2929b3);color:#ddece5;font-size:12px;line-height:1.35;transition:background .18s,border-color .18s,transform .18s,box-shadow .18s}
+.tools .tool-buttons button:hover{border-color:#77b99e;background:linear-gradient(105deg,#2e5040,#203934);transform:translateY(-1px);box-shadow:0 6px 20px #070d0d3b}
+.tools .tool-buttons button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tools .tool-buttons .tool-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:8px;background:#9fe6c817;border:1px solid #4d7765;color:#b5e6ce;font:700 10px/1 ui-monospace,monospace;letter-spacing:.15px}
+.tools .tool-buttons .tool-label{color:#dbe9e5;overflow-wrap:anywhere}
+.tools .tool-buttons .tool-arrow{color:#99daba;font-size:17px;justify-self:end}
+.tools .local-detection{margin-top:19px;padding:16px;background:#0c171991;border-color:#344e47;border-radius:12px}
+.tools .local-detection h3{font-size:13px;letter-spacing:-.15px}
+.tools details{margin-top:15px;padding-top:13px}
+.tools details summary:hover{color:#d3f1e5}
+@media(max-width:900px){.tools .tool-buttons{grid-template-columns:repeat(3,minmax(0,1fr))}.tools .tool-buttons button{grid-template-columns:28px minmax(0,1fr) 12px;gap:7px;padding:9px}.tools .tool-buttons .tool-icon{width:28px;height:30px;font-size:9px}}
+@media(max-width:600px){.tools .tool-buttons{grid-template-columns:minmax(0,1fr)}.tools .tool-buttons button{grid-template-columns:34px minmax(0,1fr) 16px;gap:11px;padding:10px 12px}.tools .tool-buttons .tool-icon{width:34px;height:34px;font-size:10px}}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Exporter — English Autopilot",
-  "version": "2.4.18",
+  "version": "2.4.19",
   "description": "Resumable ChatGPT and small Library file backup, local file recovery, viewer metadata, adaptive checks and searchable activity logs.",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -15,7 +15,9 @@
     "https://chatgpt.com/*",
     "https://api.github.com/*",
     "https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/download/*",
-    "https://release-assets.githubusercontent.com/*"
+    "https://release-assets.githubusercontent.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
   ],
   "background": {
     "service_worker": "background.js",
