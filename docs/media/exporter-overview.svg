@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="560" viewBox="0 0 1600 560" role="img" aria-labelledby="hero-title hero-description">
+  <title id="hero-title">ChatGPT Exporter for Microsoft Edge</title>
+  <desc id="hero-description">Automatic local ChatGPT backups with conversation exports, SHA-256 file reuse and resumable queues.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1221"/>
+      <stop offset="0.55" stop-color="#121c31"/>
+      <stop offset="1" stop-color="#213253"/>
+    </linearGradient>
+    <radialGradient id="halo">
+      <stop offset="0" stop-color="#5669b6" stop-opacity=".25"/>
+      <stop offset="1" stop-color="#5669b6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cardTop" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#8bc6f7"/>
+      <stop offset=".52" stop-color="#8fe1ce"/>
+      <stop offset="1" stop-color="#a9a3ff"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#8faddc" stroke-opacity=".075" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1600" height="560" rx="28" fill="url(#background)"/>
+  <rect width="1600" height="560" rx="28" fill="url(#grid)"/>
+  <ellipse cx="1370" cy="112" rx="420" ry="300" fill="url(#halo)"/>
+  <path d="M 1135 70 C 1245 42 1395 65 1530 165" fill="none" stroke="#93b1e1" stroke-opacity=".22" stroke-width="2"/>
+  <path d="M 1190 82 C 1345 110 1460 175 1548 310" fill="none" stroke="#93b1e1" stroke-opacity=".15" stroke-width="2"/>
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <text x="94" y="102" fill="#aebdff" font-size="24" letter-spacing="4">CHATGPT EXPORTER  ·  MICROSOFT EDGE</text>
+    <text x="94" y="205" fill="#f2f6ff" font-size="71" font-weight="700">Automatic ChatGPT backups.</text>
+    <text x="96" y="278" fill="#c2cee6" font-size="30">Conversations · images · Library files · local recovery</text>
+    <g fill="#17253c" fill-opacity=".94" stroke="#425878" stroke-width="2">
+      <rect x="94" y="348" width="430" height="130" rx="18"/>
+      <rect x="585" y="348" width="430" height="130" rx="18"/>
+      <rect x="1076" y="348" width="430" height="130" rx="18"/>
+    </g>
+    <g stroke="url(#cardTop)" stroke-width="4" stroke-linecap="round">
+      <path d="M 122 350 H 250"/>
+      <path d="M 613 350 H 741"/>
+      <path d="M 1104 350 H 1232"/>
+    </g>
+    <g fill="#99e0d1" font-size="30" font-weight="700">
+      <text x="127" y="406">Conversations</text>
+      <text x="618" y="406">Files &amp; Library</text>
+      <text x="1109" y="406">Resumable runs</text>
+    </g>
+    <g fill="#c0cbe1" font-size="23">
+      <text x="127" y="449">JSON · Markdown · revisions</text>
+      <text x="618" y="449">Images · SHA-256 · shared copies</text>
+      <text x="1109" y="449">Hold/resume · pacing · recovery</text>
+    </g>
+  </g>
+</svg>

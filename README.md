@@ -1,21 +1,44 @@
 <div align="center">
 
 # ChatGPT Exporter
-### Your conversations. Your files. Kept close.
+### Automatic ChatGPT backups for Microsoft Edge
 
-**English Autopilot for Microsoft Edge · v2.4.20**
+[![Latest release](https://img.shields.io/github/v/release/kitomisaitichi-design/chatgpt-exporter?label=Download&color=78aaff)](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest)
+[![Release build](https://github.com/kitomisaitichi-design/chatgpt-exporter/actions/workflows/release.yml/badge.svg)](https://github.com/kitomisaitichi-design/chatgpt-exporter/actions/workflows/release.yml)
+![Microsoft Edge](https://img.shields.io/badge/Microsoft_Edge-Extension-9bcdbd)
+![Local storage](https://img.shields.io/badge/Backup_destination-Local_folder-b5a7ee)
 
-[Download the extension](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest) · [Complete feature guide](docs/FEATURES.md) · [Every version](docs/HISTORY.md) · [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)
+**[Download Edge ZIP](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest) · [Install](#install-in-edge) · [Feature catalog](#feature-catalog) · [Demo gallery](#see-it-in-use) · [Release notes](release-notes)**
 
 </div>
 
-Back up available ChatGPT conversations as native JSON and readable Markdown. Save eligible uploads, generated files and images; reuse verified local copies; keep revisions and a queue you can resume. Everything goes into a folder you choose.
+![ChatGPT Exporter: local chat backups, Library files and resumable workflows](docs/media/exporter-overview.svg)
 
-![Backup dashboard demonstration with fictional sample data](docs/media/backup.gif)
+Automatically export available ChatGPT conversations as **native JSON and readable Markdown**. Back up eligible uploads, generated images and Library files; reuse verified local content; and keep backup queues, revisions and file references together in a folder you choose.
 
-*Actual extension UI, fictional sample data, edited playback. [High-resolution dashboard](docs/media/dashboard.png) · [Demo details](docs/DEMO.md).*
+**Latest release — v2.4.20:** Corrects stale Library file-size metadata using verified transferred bytes, reuses SHA-256-identical files across Chat and Library, and recovers file records blocked by the old false-size error. The v2.4.19 update also stopped unnecessary unchanged-chat rewrites and reorganized the dashboard layout. **[Read the v2.4.20 changes](release-notes/v2.4.20.md).**
 
-## What it does
+## Dashboard preview
+
+![ChatGPT Exporter dashboard demonstration using fictional sample data](docs/media/backup.gif)
+
+*Actual extension interface with fictional data and edited playback. [Full-resolution dashboard](docs/media/dashboard.png) · [Demo recording details](docs/DEMO.md).*
+
+## Install in Edge
+
+1. [Download the latest release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest). Choose the named extension ZIP; its adjacent SHA-256 asset verifies the download.
+2. Extract into a permanent folder. Locate **ChatGPT-Exporter-English-Edge**, containing manifest.json.
+3. Open **edge://extensions**, enable **Developer mode**, select **Load unpacked**, then select that folder.
+4. Open the exporter, connect to your signed-in ChatGPT account/workspace, and choose a backup folder.
+5. Choose enabled sources, download/images preferences and export mode, then **Start / resume**. Leave Passive watcher on for continued checks.
+
+No build tools are required. The GitHub source archives also work by selecting their extension subfolder.
+
+**Updating manually:** stop backup, keep a copy of the existing extension folder, replace runtime files in the same location, Reload its existing Edge extension card and refresh the dashboard. Reconnect and resume the same backup. Preserve optional Viewer/custom patches separately. Do not clear browser data or replace the extension identity.
+
+**Automatic installation:** enable the optional idle switch and choose the actual installed extension folder. It verifies release assets and original runtime files before writing, keeps .exporter-rollback snapshots, and reloads after success. Unsupported customizations defer to manual installation. [Full behavior and rollback](docs/FEATURES.md#release-checks-and-optional-silent-installation).
+
+## Feature catalog
 
 | Feature | What you get |
 | --- | --- |
@@ -53,20 +76,6 @@ Checks notify in the dashboard by default. **Install automatically when idle** i
 ### Find the event you need
 
 ![Activity search, categories and reset](docs/media/logs.gif)
-
-## Install in Edge
-
-1. [Download the latest release](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest). Choose the named extension ZIP; its adjacent SHA-256 asset verifies the download.
-2. Extract into a permanent folder. Locate **ChatGPT-Exporter-English-Edge**, containing manifest.json.
-3. Open **edge://extensions**, enable **Developer mode**, select **Load unpacked**, then select that folder.
-4. Open the exporter, connect to your signed-in ChatGPT account/workspace, and choose a backup folder.
-5. Choose enabled sources, download/images preferences and export mode, then **Start / resume**. Leave Passive watcher on for continued checks.
-
-No build tools are required. The GitHub source archives also work by selecting their extension subfolder.
-
-**Updating manually:** stop backup, keep a copy of the existing extension folder, replace runtime files in the same location, Reload its existing Edge extension card and refresh the dashboard. Reconnect and resume the same backup. Preserve optional Viewer/custom patches separately. Do not clear browser data or replace the extension identity.
-
-**Automatic installation:** enable the optional idle switch and choose the actual installed extension folder. It verifies release assets and original runtime files before writing, keeps .exporter-rollback snapshots, and reloads after success. Unsupported customizations defer to manual installation. [Full behavior and rollback](docs/FEATURES.md#release-checks-and-optional-silent-installation).
 
 ## Bring your existing archive
 
