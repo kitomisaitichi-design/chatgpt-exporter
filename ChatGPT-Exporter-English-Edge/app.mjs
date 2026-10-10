@@ -4,7 +4,7 @@ import {seedFileSources,observeChatFiles,sharedFileCandidates,sharedFileBudget,r
 import {ContentStore,validHash,isImage,applyImagePreference,contentHash,rememberVerifiedBlob} from './file-intelligence.mjs';
 import {LocalIndexSession} from './local-index.mjs';
 import {LibraryPanel} from './library-ui.mjs';
-import {LIBRARY_LIMIT,libraryState,queueLibraryScan,libraryIndex,libraryPath,libraryCandidates,manualFiles,retryLibraryFile,recoverLocalFileFailures,LIBRARY_FAILURE_LIMIT} from './library.mjs';
+import {LIBRARY_LIMIT,libraryState,queueLibraryScan,libraryIndex,libraryPath,libraryCandidates,manualFiles,retryLibraryFile,recoverLocalFileFailures,verifyLibraryTransferSize,LIBRARY_FAILURE_LIMIT} from './library.mjs';
 import {CatalogWriter} from './catalog-writer.mjs';
 import {LogPanel,appendEvent} from './logs.mjs';
 import {conversationFiles,libraryFileMap,viewerHandoff,catalogHTML} from './interop.mjs';
@@ -175,7 +175,7 @@ function migrateLoadedJob(j){
   applyImagePreference(j);const lib=libraryState(j,now);
   for(const f of Object.values(lib.entries))if((f.attempts || 0)>=LIBRARY_FAILURE_LIMIT && f.status!=='saved' && !f.parked){f.parked=true;f.status='unavailable';f.retryAt=0;f.parkedAt ||= now;changed=true;}
   if(lib.discoveryRevision!==2){lib.discoveryRevision=2;lib.sources=[];lib.nextScanAt=now;lib.state='ready';changed=true;}
-  if(j.version!==VERSION){const recovered=recoverLocalFileFailures(j,now);if(recovered)appendEvent(j,`Recovered ${recovered} file records charged only for missing local filesystem entries; remote failure budgets retained.`,now,'info','files');ensureWatchSchedule(j,now);j.version=VERSION;changed=true;}
+  if(j.version!==VERSION){const recovered=recoverLocalFileFailures(j,now);if(recovered)appendEvent(j,`Recovered ${recovered} file records blocked by known local-file or stale Library size errors; unrelated remote failure budgets retained.`,now,'info','files');ensureWatchSchedule(j,now);j.version=VERSION;changed=true;}
   return changed;
 }
 async function connect(expectedKey=null) {
@@ -321,14 +321,14 @@ async function ensureLibraryJob(){if(!connected || !scope)throw new Paused('Conn
 async function fileAt(path){let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);return (await d.getFileHandle(parts.at(-1))).getFile();}
 async function byteHash(blob){return contentHash(blob);}
 async function verifyLibraryFile(f){
-  try{const {blob:disk,hash}=await contentStore.inspect(f.path || libraryPath(f));if(f.size!=null&&disk.size!==f.size)return false;if(f.sha256 && hash!==f.sha256)return false;f.sha256=hash;f.size=disk.size;return true;}
+  try{const {blob:disk,hash}=await contentStore.inspect(f.path || libraryPath(f));if(f.sha256 && hash!==f.sha256 || f.remoteSha256 && hash!==f.remoteSha256 || f.size!=null&&disk.size!==f.size&&!validHash(f.sha256 || f.remoteSha256))return false;f.sha256=hash;f.size=disk.size;return true;}
   catch(e){if(['NotFoundError','TypeMismatchError'].includes(e.name)||/empty, too large/.test(e.message))return false;throw e;}
 }
 async function downloadLibraryFile(f,beforeRequest){
   const dest=libraryPath(f);
   if(f.size!==null&&f.size>=LIBRARY_LIMIT)return {status:'manual',autoRetry:false,error:'At or above the 10 MB automatic-download boundary.'};
   if(!f.refresh){
-    try{const disk=await fileAt(f.path || dest);if(disk.size<LIBRARY_LIMIT && (f.size===null || disk.size===f.size) && !attachmentError(await disk.slice(0,8192).text())){const hash=await byteHash(disk);if((!f.sha256 || f.sha256===hash)&&(!f.remoteSha256 || f.remoteSha256===hash))return await contentStore.find(hash,{size:disk.size,maxBytes:LIBRARY_LIMIT-1,exclude:f}) || {status:'saved',source:'existing-local',refresh:false,size:disk.size,path:f.path || dest,sha256:hash};}}catch(e){if(!['NotFoundError','TypeMismatchError'].includes(e.name))throw e;}
+    try{const disk=await fileAt(f.path || dest);if(disk.size<LIBRARY_LIMIT && !attachmentError(await disk.slice(0,8192).text())){const hash=await byteHash(disk);if((f.size===null || disk.size===f.size || validHash(f.sha256 || f.remoteSha256))&&(!f.sha256 || f.sha256===hash)&&(!f.remoteSha256 || f.remoteSha256===hash))return await contentStore.find(hash,{size:disk.size,maxBytes:LIBRARY_LIMIT-1,exclude:f}) || {status:'saved',source:'existing-local',refresh:false,size:disk.size,path:f.path || dest,sha256:hash};}}catch(e){if(!['NotFoundError','TypeMismatchError'].includes(e.name))throw e;}
     // A local name+size match also requires a reported SHA-256 before reuse.
     const local=await reuseLocalAttachment(f);if(local)return local;
   }
@@ -338,7 +338,12 @@ async function downloadLibraryFile(f,beforeRequest){
   if(!prep.ok){if(prep.imageExcluded)return {status:'manual',imageExcluded:true,mime:prep.type,error:null};if([401,409].includes(prep.status))throw new Paused(prep.error || 'Reconnect to ChatGPT before downloading Library files.');return {status:prep.status===413?'manual':'deferred',httpStatus:prep.status,retryAfter:prep.retryAfter,routesTried:prep.attempts || [],size:prep.size ?? f.size,error:prep.error || 'HTTP '+prep.status};}
   const chunks=[];let offset=0;
   try{for(;;){await engine?.holdPoint();const part=await bridge({op:'assetChunk',key:prep.key,offset,length:384*1024});if(!part.ok)throw Error(part.error || 'Library file chunk failed.');const bytes=decode64(part.base64);if(part.next!==offset+bytes.length || !part.done&&part.next<=offset || part.next>=LIBRARY_LIMIT)throw Error('Library chunk exceeded its boundary or made no progress.');chunks.push(bytes);offset=part.next;if(part.done){if(offset!==prep.size)throw Error('Library file bytes were incomplete.');break;}}}finally{await bridge({op:'assetRelease',key:prep.key}).catch(()=>{});}
-  const blob=new Blob(chunks,{type:prep.type || f.mime || 'application/octet-stream'});if(f.size!==null && blob.size!==f.size)throw Error('Library file size differs from its metadata.');if(attachmentError(await blob.slice(0,8192).text()))return {status:'unavailable',error:'Library service returned an error envelope instead of file bytes.'};
+  const blob=new Blob(chunks,{type:prep.type || f.mime || 'application/octet-stream'});const incorrectListing=verifyLibraryTransferSize(prep.size,blob.size,f.size);if(attachmentError(await blob.slice(0,8192).text()))return {status:'unavailable',error:'Library service returned an error envelope instead of file bytes.'};
+  // A Library listing can contain a stale size. The complete prepared bytes
+  // and, when available, the reported SHA-256 are verified by the transfer and
+  // ContentStore.save. Persist the real byte count and leave the listing's
+  // original claim in reportedSize for subsequent scans.
+  if(incorrectListing)appendEvent(job,`Library metadata size corrected for ${f.name}: listed ${f.size} bytes, verified ${blob.size} bytes.`,Date.now(),'info','library');
   const saved=await contentStore.save(blob,f,{maxBytes:LIBRARY_LIMIT-1});return {...saved,mime:prep.type || f.mime,routesTried:prep.attempts || []};
 }
 async function removeContent(path){let d=root;const parts=path.split('/');for(const p of parts.slice(0,-1))d=await d.getDirectoryHandle(p);await d.removeEntry(parts.at(-1));localFiles.remove('backup',path);}

@@ -67,11 +67,11 @@ export class ContentStore {
   }
   async findFor(file,{maxBytes=ATTACHMENT_MAX_BYTES}={}){
     const expected=validHash(file.remoteSha256 || (!file.refresh?file.sha256:null));
-    const known=await this.find(expected,{size:file.size??null,maxBytes,exclude:file});if(known)return known;
+    const known=await this.find(expected,{size:expected?null:file.size??null,maxBytes,exclude:file});if(known)return known;
     if(file.refresh&&!expected)return null;const visited=new Set();
     for(const f of relatedFiles(this.getJob(),file,this.references())){
       if(f===file || f.status!=='saved' || f.refresh || !validHash(f.sha256) || !safeContentPath(f.path) || visited.has(f.path) || !compatibleFile(file,f))continue;visited.add(f.path);
-      try{await this.checkpoint();const checked=await this.inspect(f.path,maxBytes);if(checked.hash!==validHash(f.sha256) || expected&&checked.hash!==expected || file.size!=null&&checked.blob.size!==Number(file.size))continue;return {status:'saved',source:'identity-reuse',refresh:false,path:f.path,sha256:checked.hash,size:checked.blob.size,mime:f.mime || null,duplicate:true,duplicateOf:f.id};}catch(e){if(['Paused','NotAllowedError','SecurityError','QuotaExceededError'].includes(e.name))throw e;if(!['NotFoundError','TypeMismatchError'].includes(e.name)&&!/empty, too large/.test(e.message))throw e;}
+      try{await this.checkpoint();const checked=await this.inspect(f.path,maxBytes);if(checked.hash!==validHash(f.sha256) || expected&&checked.hash!==expected || file.size!=null&&checked.blob.size!==Number(file.size)&&!expected)continue;return {status:'saved',source:'identity-reuse',refresh:false,path:f.path,sha256:checked.hash,size:checked.blob.size,mime:f.mime || null,duplicate:true,duplicateOf:f.id};}catch(e){if(['Paused','NotAllowedError','SecurityError','QuotaExceededError'].includes(e.name))throw e;if(!['NotFoundError','TypeMismatchError'].includes(e.name)&&!/empty, too large/.test(e.message))throw e;}
     }
     return null;
   }

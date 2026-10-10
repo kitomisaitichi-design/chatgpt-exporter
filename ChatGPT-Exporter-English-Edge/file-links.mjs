@@ -24,7 +24,7 @@ export function compatibleFile(target,candidate){
   const native=f=>f.fileId || f.file_id || (/^file[-_]/.test(f.id || '')?f.id:null),a=native(target),b=native(candidate);
   if(a&&b&&a!==b&&(!expected||expected!==actual))return false;
   if(expected&&actual&&expected!==actual)return false;
-  if(target.size!=null&&candidate.size!=null&&Number(target.size)!==Number(candidate.size))return false;
+  if(target.size!=null&&candidate.size!=null&&Number(target.size)!==Number(candidate.size)&&!(expected&&actual&&expected===actual))return false;
   if(target.refresh&&!hash(target.remoteSha256))return false;
   if(!expected&&epoch(target.updated)>epoch(candidate.updated)&&epoch(candidate.updated))return false;
   return true;

@@ -7,6 +7,10 @@ import {validHash,analyzeFiles,applyImagePreference} from './file-intelligence.m
 export const LIBRARY_LIMIT=10_000_000; // Decimal MB; the boundary itself is manual.
 export const LIBRARY_INTERVAL=3*60*60*1000;
 export const LIBRARY_FAILURE_LIMIT=2;
+export function verifyLibraryTransferSize(preparedSize,actualSize,listedSize){
+  if(actualSize!==preparedSize)throw Error('Library file transfer did not match its prepared byte count.');
+  return listedSize!=null && actualSize!==Number(listedSize);
+}
 const idOf=v=>typeof v==='string' && /^[a-zA-Z0-9_-]{1,180}$/.test(v)?v:null;
 export function libraryState(job,now=Date.now()) {
   return job.library ||= {schema:'chatgpt-library/v1',entries:{},directories:{},sources:[],nextScanAt:now,lastScanAt:0};
@@ -23,7 +27,7 @@ export function normalizeLibraryItem(item,parent=null) {
   const size=rawSize!==undefined && rawSize!==null && rawSize!=='' && Number.isFinite(Number(rawSize)) && Number(rawSize)>=0?Number(rawSize):null;
   const conversationIds=f.conversation_ids || item.conversation_ids;
   const c=[...Array.isArray(conversationIds)?conversationIds:[],f.conversation_id,item.conversation_id,f.source_conversation_id,item.source_conversation_id,f.origination_thread_id,item.origination_thread_id];
-  return {id,fileId,libraryId,name:String(f.file_name || f.filename || f.name || item.name || id).slice(0,1024),size,mime:f.mime_type || f.content_type || item.mime_type || null,parent:f.parent_directory_id || item.parent_directory_id || f.directory_id || item.directory_id || parent,created:f.create_time ?? f.created_at ?? f.creation_time ?? f.record_creation_time ?? item.created_at ?? null,uploaded:f.uploaded_at ?? f.upload_time ?? item.uploaded_at ?? null,firstModified:f.first_modified_at ?? f.first_modified_time ?? item.first_modified_at ?? null,updated:f.update_time ?? f.updated_at ?? f.modified_at ?? f.modification_time ?? f.last_modified_at ?? item.updated_at ?? null,remoteSha256:validHash(f.sha256 || f.content_sha256 || f.checksum?.sha256 || item.sha256),gizmoId:idOf(f.gizmo_id || item.gizmo_id),external:(f.access_kind || item.access_kind)==='mounted' || !!f.cloud_doc_url,conversationIds:[...new Set(c.filter(validId))]};
+  return {id,fileId,libraryId,name:String(f.file_name || f.filename || f.name || item.name || id).slice(0,1024),size,reportedSize:size,mime:f.mime_type || f.content_type || item.mime_type || null,parent:f.parent_directory_id || item.parent_directory_id || f.directory_id || item.directory_id || parent,created:f.create_time ?? f.created_at ?? f.creation_time ?? f.record_creation_time ?? item.created_at ?? null,uploaded:f.uploaded_at ?? f.upload_time ?? item.uploaded_at ?? null,firstModified:f.first_modified_at ?? f.first_modified_time ?? item.first_modified_at ?? null,updated:f.update_time ?? f.updated_at ?? f.modified_at ?? f.modification_time ?? f.last_modified_at ?? item.updated_at ?? null,remoteSha256:validHash(f.sha256 || f.content_sha256 || f.checksum?.sha256 || item.sha256),gizmoId:idOf(f.gizmo_id || item.gizmo_id),external:(f.access_kind || item.access_kind)==='mounted' || !!f.cloud_doc_url,conversationIds:[...new Set(c.filter(validId))]};
 }
 export function libraryPage(data) {
   const body=data?.data && typeof data.data==='object'?data.data:data;
@@ -37,7 +41,17 @@ export function libraryPage(data) {
 export function mergeLibraryItem(state,item,now=Date.now()) {
   if(item.directory){state.directories[item.id]=item;return false;}
   const old=state.entries[item.id],reportedHash=validHash(item.remoteSha256);
-  if(old){item={...item};for(const key of ['size','mime','created','uploaded','firstModified','updated','remoteSha256','fileId','libraryId','parent'])if(item[key]==null)item[key]=old[key];if(item.name===item.id && old.name)item.name=old.name;}
+  if(old){
+    item={...item};const previouslyReported=old.reportedSize??old.size;
+    // A server listing can retain an incorrect byte count after the exact
+    // fetched/local bytes were saved and hashed. Retain the verified size
+    // while the listing repeats the same claim for the same content.
+    if(old.status==='saved' && validHash(old.sha256) && item.size!=null &&
+      ((item.reportedSize===previouslyReported && (!reportedHash || reportedHash===validHash(old.sha256))) ||
+       (reportedHash && reportedHash===validHash(old.sha256))))item.size=old.size;
+    for(const key of ['size','reportedSize','mime','created','uploaded','firstModified','updated','remoteSha256','fileId','libraryId','parent'])if(item[key]==null)item[key]=old[key];
+    if(item.name===item.id && old.name)item.name=old.name;
+  }
   const sameKnownContent=old && reportedHash && reportedHash===validHash(old.sha256) && (item.size==null || item.size===old.size);
   const changed=old && !sameKnownContent && ((reportedHash && reportedHash!==old.remoteSha256 && reportedHash!==old.sha256) || (item.size!==null && old.size!==null && item.size!==old.size) || epoch(item.updated)>epoch(old.updated));
   if(changed)item.remoteSha256=reportedHash;
@@ -79,15 +93,16 @@ export function retryLibraryFile(file,now=Date.now()) {
 }
 export function recoverLocalFileFailures(job,now=Date.now()) {
   const local=f=>!f.status&&/^A requested file or directory could not be found at the time an operation was processed\.?$/i.test(f.error || '');
+  const staleSize=f=>/^Library file size differs from its metadata\.?$/i.test(f.error || '');
   let recovered=0;
   for(const file of fileReferences(job)){
     if(file.historical||['saved','manual'].includes(file.status)||!file.attempts)continue;
-    const history=file.failureHistory || [],charged=history.slice(-file.attempts),falseCharges=charged.filter(f=>!f.excludedFromBudget&&local(f));
+    const history=file.failureHistory || [],charged=history.slice(-file.attempts),falseCharges=charged.filter(f=>!f.excludedFromBudget&&(local(f)||staleSize(f)));
     // Older chat records have no history. Only the latest explicit local fault
     // is proven there; retain the earlier unknown attempt conservatively.
-    const removed=falseCharges.length || (!history.length&&!file.lastFailureStatus&&local({error:file.error})?1:0);
+    const removed=falseCharges.length || (!history.length&&!file.lastFailureStatus&&(local({error:file.error})||staleSize({error:file.error}))?1:0);
     if(!removed)continue;
-    for(const failure of falseCharges)failure.excludedFromBudget='local-filesystem';
+    for(const failure of falseCharges)failure.excludedFromBudget=staleSize(failure)?'stale-library-size-metadata':'local-filesystem';
     const attempts=Math.max(0,file.attempts-removed);
     file.localFailureRecovery={at:now,attemptsBefore:file.attempts,removed,remaining:attempts,error:file.error};
     Object.assign(file,{status:'pending',parked:false,parkedAt:null,attempts,retryAt:0,error:null,lastFailureStatus:null,retriedAt:now,autoRetry:true});recovered++;

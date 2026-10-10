@@ -3,7 +3,7 @@
 # ChatGPT Exporter
 ### Your conversations. Your files. Kept close.
 
-**English Autopilot for Microsoft Edge · v2.4.19**
+**English Autopilot for Microsoft Edge · v2.4.20**
 
 [Download the extension](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest) · [Complete feature guide](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/FEATURES.md) · [Every version](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/HISTORY.md) · [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)
 

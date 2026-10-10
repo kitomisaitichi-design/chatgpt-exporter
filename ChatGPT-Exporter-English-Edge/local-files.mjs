@@ -49,7 +49,7 @@ export function localCopyCandidates(inventory,asset){return [...iterateLocalCopy
 export function* iterateLocalCopyCandidates(inventory,asset){
   const expected=validHash(asset.remoteSha256 || asset.sha256),ids=fileIds(asset),names=inventory.index.get(key(asset.name))||[],exact=expected?inventory.byHash.get(expected)||[]:[];
   const native=new Set(ids.flatMap(id=>[...(inventory.byId.get(id)||[])])),peers=expected&&asset.size!=null?(inventory.unclassified?inventory.unclassified.get(Number(asset.size)) || []:inventory.bySize.get(Number(asset.size)) || []):[],seen=new Set();
-  for(const group of [exact,native,expected&&asset.size==null?names:[],peers])for(const c of group){if(seen.has(c)||c.removed)continue;seen.add(c);if(asset.size!=null&&c.size!==Number(asset.size)||!expected&&(!c.identityHash||!native.has(c)||c.verified&&c.hash!==c.identityHash)||expected&&c.verified&&c.hash!==expected)continue;yield c;}
+  for(const group of [exact,native,expected?names:[],peers])for(const c of group){if(seen.has(c)||c.removed)continue;seen.add(c);if(asset.size!=null&&c.size!==Number(asset.size)&&!expected||!expected&&(!c.identityHash||!native.has(c)||c.verified&&c.hash!==c.identityHash)||expected&&c.verified&&c.hash!==expected)continue;yield c;}
 }
 export async function verifyLocalCopy(candidate,asset,inventory,hashBlob){
   for(const k of ['index','byHash','byId','bySize','hashCache','records','unclassified'])inventory[k] ||= new Map();
@@ -58,5 +58,5 @@ export async function verifyLocalCopy(candidate,asset,inventory,hashBlob){
   const expected=validHash(asset.remoteSha256 || asset.sha256) || candidate.identityHash || candidate.hash;
   if(file.size!==candidate.size||candidate.lastModified!=null&&file.lastModified!==candidate.lastModified){removeLocalCandidate(inventory,candidate);candidate={...candidate,size:file.size,lastModified:file.lastModified,verified:false,hash:null,removed:false};registerLocalCandidate(inventory,candidate);}
   const cacheKey=candidate.source+':'+candidate.path+':'+file.size+':'+file.lastModified,cached=inventory.hashCache.get(cacheKey);let hash=cached?.handle&&await sameLocalEntry(cached.handle,candidate.handle)?cached.hash:null;if(!hash){hash=await hashBlob(file);inventory.hashCache.set(cacheKey,{hash,handle:candidate.handle});}
-  classify(inventory,candidate,hash);inventory.onVerified?.(candidate,file,hash);return expected&&hash===expected&&(asset.size==null||file.size===Number(asset.size))?file:null;
+  classify(inventory,candidate,hash);inventory.onVerified?.(candidate,file,hash);return expected&&hash===expected?file:null;
 }
