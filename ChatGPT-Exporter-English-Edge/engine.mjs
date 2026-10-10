@@ -13,7 +13,7 @@ export class RequestError extends Error {constructor(status, message) {super(mes
 export class Engine {
   constructor(job, io) {this.job=job;seedFileSources(job,(io.now || Date.now)());this.io=io;this.stopped=false;this.held=false;this.wakeRevision=0;this.cachedIds=new Set();this.now=io.now || Date.now;this.sleep=io.sleep || (ms=>new Promise(r=>setTimeout(r,ms)));}
   async save() {this.job.updated=this.now();await this.io.save(this.job);this.io.changed?.(this.job);}
-  async holdPoint(){if(this.queueActive&&!await this.queueActive()){const e=Error('Viewer queue paused');e.name='ViewerQueuePaused';throw e;}while(this.held){if(this.stopped)throw new Paused('Paused by you.');await this.sleep(400);}if(this.stopped)throw new Paused('Paused by you.');}
+  async holdPoint(){while(this.held){if(this.stopped)throw new Paused('Paused by you.');await this.sleep(400);}if(this.stopped)throw new Paused('Paused by you.');}
   event(message,level,category) {appendEvent(this.job,message,this.now(),level,category);}
   wake(){this.wakeRevision++;}
   async wait(until, label) {const revision=this.wakeRevision;while (this.now()<until&&revision===this.wakeRevision) {await this.holdPoint();await this.io.maintenance?.();this.job.message=label;this.io.changed?.(this.job);await this.sleep(Math.min(1000,Math.max(0,until-this.now())));}await this.holdPoint();}
@@ -28,7 +28,6 @@ export class Engine {
       for(const c of s.captured || [])this.cachedIds.add(c.id);
       for(const item of s.hints || [])changed=mergeEntry(this.job,item)||changed;
       for(const item of s.changedChats || []){
-        if(this.job.viewerDeletes?.[item.id]?.verified)continue;
         if(!validId(item.id) || !item.revision || this.job.entries[item.id]?.nativeWriteRevision===item.revision)continue;
         mergeEntry(this.job,{id:item.id,origin:'completed ChatGPT reply'});
         Object.assign(this.job.entries[item.id],{nativeWriteRevision:item.revision,nativeWriteAt:item.at,status:'pending',refresh:true,attempts:0,retryAt:0,brokenUntil:0,changeReason:'ChatGPT reply completed'});changed=true;
@@ -36,7 +35,6 @@ export class Engine {
       }
       for(const item of s.changedBodies || []){
         const existing=this.job.entries[item.id];
-        if(this.job.viewerDeletes?.[item.id]?.verified)continue;
         if(existing?.observedBodyHash===item.contentHash || existing?.contentHash===item.contentHash || item.revisionHash && (existing?.observedBodyRevision===item.revisionHash || existing?.revisionHash===item.revisionHash))continue;
         mergeEntry(this.job,item);const e=this.job.entries[item.id];this.cachedIds.add(item.id);const baseline=e?.contentHash || item.previousContentHash || null;
         if(e){e.observedBodyHash=item.contentHash;if(item.revisionHash)e.observedBodyRevision=item.revisionHash;}
@@ -56,7 +54,6 @@ export class Engine {
   async reconcileInventory(items=[]) {
     let diskSaved=0,indexOnly=0,cacheOnly=0;this.job.phase='local';this.job.message='Reconciling the existing backup locally — no ChatGPT requests are being made.';this.io.changed?.(this.job);
     for(const item of items){
-      if(this.job.viewerDeletes?.[item.id]?.verified || this.job.entries[item.id]?.remoteDeletedAt)continue;
       const before={...this.job.entries[item.id]},wasRefresh=!!before.refresh;mergeEntry(this.job,{...item,localDetected:true});const e=this.job.entries[item.id];if(!e)continue;
       if(item.checkedUpdateTime && epoch(item.checkedUpdateTime)>epoch(e.checkedUpdateTime))e.checkedUpdateTime=item.checkedUpdateTime;
       if(item.basename && !e.basename)e.basename=item.basename;if(item.contentHash && !e.contentHash)e.contentHash=item.contentHash;if(item.contentHash && e.contentHash && e.contentHash!==item.contentHash)e.revisionHash=item.revisionHash || null;else if(item.revisionHash && !e.revisionHash)e.revisionHash=item.revisionHash;if(item.previousContentHash && !e.previousContentHash)e.previousContentHash=item.previousContentHash;if(item.revisionCount)e.revisionCount=Math.max(e.revisionCount || 0,item.revisionCount);if(item.changedAt)e.changedAt=e.changedAt || item.changedAt;if(item.savedAt)e.savedAt=e.savedAt || item.savedAt;if(item.chatKind && !e.chatKind)e.chatKind=item.chatKind;if(item.chatKindEvidence && !e.chatKindEvidence)e.chatKindEvidence=item.chatKindEvidence;if(item.project)e.project=e.project || item.project;mergeInventoryAttachments(e,item);
@@ -205,7 +202,6 @@ export class Engine {
       this.job.discoveryAudit ||= {round:0,baseline:Object.keys(this.job.entries).length,stable:false};schedulerState(this.job,this.now());
       for (;;) {
         await this.holdPoint();await this.observe();
-        if(await this.io.viewerQueue?.(this))continue;
         const pending=Object.values(this.job.entries).filter(e=>e.status==='pending'),eligible=pending.filter(e=>!e.retryAt || e.retryAt<=this.now()).sort((a,b)=>calendarTime(a)-calendarTime(b) || String(a.id).localeCompare(String(b.id)));
         const indexOnly=this.job.options.mode==='index-only';
         const urgentReady=eligible.find(e=>e.refresh && (e.nativeWriteAt || e.changeReason)),ready=indexOnly?null:urgentReady || eligible.find(e=>this.cachedIds.has(e.id)&&!e.refresh) || eligible.find(e=>!e.recoveryPending) || eligible[0];

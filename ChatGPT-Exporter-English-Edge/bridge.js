@@ -155,14 +155,6 @@
         if(!(response.headers.get('content-type') || '').includes('json'))return {ok:false,status:403,error:'Open the Library in ChatGPT and finish sign-in or browser verification.'};
         const observed=response.clone(),data=await response.json();if(!matches(args.scope))return {ok:false,status:409,error:'Workspace changed during Library discovery.'};void observe(observed,new URL(path,location.origin),args.scope).catch(()=>{});return {ok:true,status:200,data};
       }
-      if(args.op==='viewerDelete'){
-        if(!/^[a-zA-Z0-9_-]{8,160}$/.test(args.id||''))return {ok:false,status:400,error:'Invalid conversation ID'};
-        if(lastLimit&&lastLimit.at>(args.lastLimitSeen||0))return {ok:false,status:429,retryAfter:lastLimit.retryAfter,observedAt:lastLimit.at};
-        const response=await originalFetch('/backend-api/conversation/'+encodeURIComponent(args.id),{method:'PATCH',credentials:'include',headers:{...authHeaders(args.scope),accept:'application/json','content-type':'application/json'},body:JSON.stringify({is_visible:false}),signal:AbortSignal.timeout(60000)});
-        if(response.status===401){token=null;sessionAt=0;}
-        if(!matches(args.scope))return {ok:false,status:409,error:'Workspace changed during deletion'};
-        return {ok:response.ok,status:response.status,retryAfter:response.headers.get('retry-after')};
-      }
       if (args.op !== 'get' || !allowed(args.path)) return {ok:false,status:400,error:'Unsupported request'};
       if (lastLimit && lastLimit.at > (args.lastLimitSeen || 0)) return {ok:false,status:429,retryAfter:lastLimit.retryAfter,observedAt:lastLimit.at};
       const response = await originalFetch(args.path, {method:'GET', credentials:'include',headers:{...authHeaders(args.scope),accept:'application/json'},signal:AbortSignal.timeout(60000)});if (response.status === 401) {token = null; sessionAt = 0;}if (!response.ok) return {ok:false,status:response.status,retryAfter:response.headers.get('retry-after')};if (!(response.headers.get('content-type') || '').includes('json')) return {ok:false,status:403,kind:'challenge',error:'A web page was returned instead of conversation data. Open ChatGPT to check sign-in or browser verification, then resume.'};

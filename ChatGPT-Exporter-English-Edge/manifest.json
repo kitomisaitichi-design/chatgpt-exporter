@@ -15,9 +15,7 @@
     "https://chatgpt.com/*",
     "https://api.github.com/*",
     "https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/download/*",
-    "https://release-assets.githubusercontent.com/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
+    "https://release-assets.githubusercontent.com/*"
   ],
   "background": {
     "service_worker": "background.js",
