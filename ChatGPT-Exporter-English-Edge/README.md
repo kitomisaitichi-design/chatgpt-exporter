@@ -3,7 +3,7 @@
 # ChatGPT Exporter
 ### Your conversations. Your files. Kept close.
 
-**English Autopilot for Microsoft Edge · v2.4.20**
+**English Autopilot for Microsoft Edge · v2.4.21**
 
 [Download the extension](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest) · [Complete feature guide](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/FEATURES.md) · [Every version](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/HISTORY.md) · [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)
 
@@ -16,6 +16,8 @@ Back up available ChatGPT conversations as native JSON and readable Markdown. Sa
 *Actual extension UI, fictional sample data, edited playback. [High-resolution dashboard](https://raw.githubusercontent.com/kitomisaitichi-design/chatgpt-exporter/main/docs/media/dashboard.png) · [Demo details](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/DEMO.md).*
 
 ## What it does
+
+**New in 2.4.21:** Appearance offers Midnight, Graphite, Ocean, Forest, Plum, Paper, Sand and High Contrast, plus saved Compact/Comfortable spacing. Reset appearance retains your backup settings and progress. The section bar jumps to files, logs and setup; optional tools fold away and Need attention opens diagnostics. Theme controls work during backup/hold and in read-only tabs. Blank known-link input now gives validation before changing a queue. Retains the 2.4.19/2.4.20 revision and verified Library-byte fixes. [Complete appearance guide](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/APPEARANCE.md).
 
 | Feature | What you get |
 | --- | --- |

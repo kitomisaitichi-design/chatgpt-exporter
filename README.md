@@ -16,7 +16,7 @@
 
 Automatically export available ChatGPT conversations as **native JSON and readable Markdown**. Back up eligible uploads, generated images and Library files; reuse verified local content; and keep backup queues, revisions and file references together in a folder you choose.
 
-**Latest release — v2.4.20:** Corrects stale Library file-size metadata using verified transferred bytes, reuses SHA-256-identical files across Chat and Library, and recovers file records blocked by the old false-size error. The v2.4.19 update also stopped unnecessary unchanged-chat rewrites and reorganized the dashboard layout. **[Read the v2.4.20 changes](release-notes/v2.4.20.md).**
+**Latest release — v2.4.21:** Eight complete themes, a saved Compact/Comfortable layout, quick section navigation and clearer diagnostics. Appearance changes work during backup and in a read-only dashboard, with backup state kept intact. Retains the v2.4.19 revision-loop repair and v2.4.20 verified Library-size/hash fixes. **[Read the v2.4.21 changes](release-notes/v2.4.21.md).**
 
 ## Dashboard preview
 
@@ -40,6 +40,16 @@ No build tools are required. The GitHub source archives also work by selecting t
 
 ## Feature catalog
 
+### Make the dashboard yours
+
+Choose **Midnight, Graphite, Ocean, Forest, Plum, Paper, Sand or High Contrast** under Appearance. The full interface follows the selected palette, including file cards, logs, controls and status badges. Choose **Comfortable** or **Compact** spacing; settings survive refresh. Reset appearance restores visual defaults while retaining your account, queue, image settings, folder grants and failure history.
+
+The sticky section bar jumps to files, activity, appearance and setup. Links open folded tools automatically. Settings, updates and recovery tools can fold away; update notices remain visible in their summary. **Need attention** opens file-health and discovery details.
+
+![Eight exporter themes shown with fictional sample data](docs/media/theme-gallery.png)
+
+[Theme controls and gallery details](docs/APPEARANCE.md) · [Full feature guide](docs/FEATURES.md)
+
 | Feature | What you get |
 | --- | --- |
 | **Chats and revisions** | Active, archived and project discovery; manual links/IDs; native JSON with available branches; selected-branch Markdown; content fingerprints and revision metadata. |
@@ -57,6 +67,7 @@ No build tools are required. The GitHub source archives also work by selecting t
 | **Files you can browse** | Search, filters, sorting, list/grid, pagination, source details and offline HTML catalogs. |
 | **Viewer handoff** | Relative-path conversation/Library catalogs, shared files, retained sources and distinct versions for Offline Chat Viewer. |
 | **Useful activity logs** | Search, severity/category filters, pause/follow, reset, filtered copy/TXT and retained-history JSON export. |
+| **Appearance and navigation** | Eight complete themes, saved density, keyboard selection, early theme restoration, independent appearance reset, quick sections and collapsible diagnostics. |
 | **Update controls** | 12h / **24h default** / weekly / off checks; manual Check now; optional idle installation with verified assets and rollback. |
 
 [Read every feature, control, limit and recovery rule →](docs/FEATURES.md)

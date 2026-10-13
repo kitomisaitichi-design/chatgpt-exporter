@@ -1,6 +1,12 @@
 # Complete feature guide
 
-Exporter 2.4.18 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Validation](VALIDATION.md)
+Exporter 2.4.21 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
+
+## Appearance and navigation
+
+Choose Midnight, Graphite, Ocean, Forest, Plum, Paper, Sand or High Contrast in Appearance. Each palette covers backgrounds, controls, file cards, logs and meaningful status colors. Native radio selection supports keyboard arrows. Compact/Comfortable density and optional-section disclosure preferences persist independently of backup jobs. The palette's local mirror restores it before body paint when available; Chrome storage remains authoritative.
+
+Reset appearance only restores UI defaults. Backup queues, folder grants, retry budgets, images, update settings and Viewer catalogs remain intact. Appearance works during backup/hold and in a read-only dashboard tab. Quick section links open folded tools automatically; Need attention opens file-health/discovery details. Release notices remain in the closed update-section summary. See [the appearance guide](APPEARANCE.md) for controls and previews.
 
 ## Functionality at a glance
 
@@ -14,7 +20,7 @@ Exporter 2.4.18 · [Install and quick start](../README.md#install-in-edge) · [E
 | Deduplication and versions | SHA-256 content sharing across names/IDs, identity reuse before downloading, automatic bounded background linking, manual Deduplicate & smart scan for redundant-copy removal, numbered-copy families, date/revision evidence, size-only review suggestions, and retention of distinct content. |
 | Independent source history | Separate chat/Library presence, retained chat-only files, unavailable-chat records, missing Library items after complete scans, earlier verified versions, source names/links, and source filters. Missing references never remove saved copies. |
 | Download memory | Two failed file transfers shared by linked references, persistent parking, per-file or grouped explicit Retry, and no failure charge for server cooldowns or Stop. |
-| Viewer integration | Current Offline Chat Viewer 1.1.27; versioned relative-path catalogs, shared files and retained history, source-chat navigation, chat Files/text previews, and manual downloaded-copy import. Latest Viewer download link stays current. |
+| Viewer integration | Versioned relative-path catalogs, shared files and retained history, source-chat links and manual downloaded-copy import. Use the latest companion Viewer link; its current full import is not claimed by this patch. |
 | Controls and activity | Connect/folder readiness, Start/Stop, Hold/Resume, fair queue turns, active work/reason/growth/stall display, cached dashboard rendering, live six-minute activity toggle/countdown, file status cards, list/grid, search/sort/page sizes, full pagination, detailed routes, and log search/level/category/pause/follow/reset/copy/TXT/JSON controls. |
 | Recovery and portability | Same-folder queue/cache upgrades, account/workspace checks, disk-index reconciliation, portable-state import/export, cached transcript ZIP, adaptive pacing, offline waits, incomplete discovery repair and optional one-shot difficult-chat recovery. |
 | Local storage | Selected backup root, optional permitted existing-file folder, JSON/Markdown/binaries/catalogs/reports/portable checkpoints; no developer API key or external export service required. |
