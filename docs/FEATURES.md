@@ -1,6 +1,8 @@
 # Complete feature guide
 
-Exporter 2.4.21 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
+Exporter 2.4.22 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
+
+Local database recovery: if Edge closes its connection, the next operation reopens the same database. Concurrent Viewer, watcher and index requests share one open. Only transaction creation retries once; permission, quota and interrupted-transaction failures remain visible. Existing queues, saved chats, hashes and folder handles remain in place.
 
 ## Appearance and navigation
 

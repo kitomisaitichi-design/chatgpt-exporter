@@ -3,13 +3,15 @@
 # ChatGPT Exporter
 ### Your conversations. Your files. Kept close.
 
-**English Autopilot for Microsoft Edge · v2.4.21**
+**English Autopilot for Microsoft Edge · v2.4.22**
 
 [Download the extension](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest) · [Complete feature guide](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/FEATURES.md) · [Every version](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/HISTORY.md) · [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)
 
 </div>
 
 Back up available ChatGPT conversations as native JSON and readable Markdown. Save eligible uploads, generated files and images; reuse verified local copies; keep revisions and a queue you can resume. Everything goes into a folder you choose.
+
+Version 2.4.22 repairs the Viewer queue and passive watcher error “The database connection is closing.” The exporter reopens a closed local database, shares concurrent recovery and retains committed chats, index rows and settings. Interrupted writes remain visible failures and are never silently replayed. Keep the same extension installation and reload its existing Edge card; do not clear browser data. See CHANGELOG-v2.4.22.md.
 
 ![Backup dashboard demonstration with fictional sample data](https://raw.githubusercontent.com/kitomisaitichi-design/chatgpt-exporter/main/docs/media/backup.gif)
 

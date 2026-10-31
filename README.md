@@ -16,7 +16,7 @@
 
 Automatically export available ChatGPT conversations as **native JSON and readable Markdown**. Back up eligible uploads, generated images and Library files; reuse verified local content; and keep backup queues, revisions and file references together in a folder you choose.
 
-**Latest release — v2.4.21:** Eight complete themes, a saved Compact/Comfortable layout, quick section navigation and clearer diagnostics. Appearance changes work during backup and in a read-only dashboard, with backup state kept intact. Retains the v2.4.19 revision-loop repair and v2.4.20 verified Library-size/hash fixes. **[Read the v2.4.21 changes](release-notes/v2.4.21.md).**
+**Latest release — v2.4.22:** Repairs the “database connection is closing” failure affecting the Viewer queue, passive watcher and local index. Concurrent requests share a safe reconnect; committed progress stays in the existing database. Retains all eight themes, density controls and earlier chat/Library fixes. **[Read the v2.4.22 changes](release-notes/v2.4.22.md).**
 
 ## Dashboard preview
 

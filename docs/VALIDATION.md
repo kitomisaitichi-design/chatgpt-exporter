@@ -1,4 +1,14 @@
-# Validation for 2.4.21
+# Validation for 2.4.22
+
+233 Node regression tests pass, including eight storage-lifecycle cases: concurrent recovery, close/versionchange events, failed opens, bounded retries, permission/missing-store errors, quota/abort failures without replay, read completion and atomic batches. Runtime JS/MJS syntax checks pass.
+
+An isolated Microsoft Edge fixture reproduced the exact native closing-connection error twice before the fix. After the fix it verifies all five storage operations, one shared reopen for concurrent requests, closing between connection retrieval and transaction creation, an interrupted write that retains the committed job, close/versionchange invalidation, visible non-transient errors, and saved queue/cache persistence after refresh. The fixture uses synthetic data and a separate profile; it never clears or reads the user's live browser database.
+
+The existing eight themes, Viewer adapters and chat/Library behavior are preserved. A fresh full current Viewer import, live private-account export and activation in the user's existing Edge profile are not established by these isolated fixtures. Release ZIP/checksum and installed-file verification are recorded separately; browser activation requires reloading the existing extension card.
+
+The established isolated dashboard flow also completed 100 synthetic cached chats through the actual Engine: double Start writes each initial body once, Hold retains its state during theme changes, and Stop/Resume completes twenty additional chats. All four release schedules, duplicate Check now, refresh, Library filters/views, image controls and activity filters/reset pass with zero ChatGPT backend requests or page errors. Local Viewer overlay checks preserve deletion tombstones, queue pause, scope/connection heartbeat, folder readiness and the Viewer-busy idle-install gate.
+
+## Earlier validation: 2.4.21
 
 225 Node regression tests passed, including the new appearance preference tests. Runtime JS/MJS syntax checks passed. The isolated Edge theme matrix verified all eight palettes in both densities at 1920, 900 and 390-pixel widths (48 layout cases). All existing control IDs remained available; tested views retained full-width Library, compact overview/watcher spacing, unique IDs and no horizontal overflow. Foreground text in the tested controls measured at least 4.5:1 contrast in every theme (minimum among sampled controls: Paper 6.30:1; High Contrast 9.10:1).
 
