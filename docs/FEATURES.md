@@ -1,6 +1,8 @@
 # Complete feature guide
 
-Exporter 2.4.22 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
+Exporter 2.4.23 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
+
+Account-switch folder restoration: reconnect after changing account/workspace. Its explicit folder choice takes priority; otherwise a bounded search checks already granted backup roots and parent directories for exact scope metadata. Renamed/nested archives are supported and matching local transcripts restore saved counts. Existing per-account queues, file grants and Library settings stay separate. Discovery never creates a new folder, prompts for permission or trusts filenames as ownership proof. Select a shared parent once for sibling archives; ambiguous matches, expired grants and search limits explain what to select next. Internal limits: 32 remembered locations, 400 checked directories and 4,000 enumerated entries per connection, 8 ms processing yields, and 64 KiB per discovery metadata header. Selected candidates undergo normal metadata verification; full transcript reconciliation runs only when recovering a new folder/job. Too many legacy grants are reported as a search limit rather than a complete miss.
 
 Local database recovery: if Edge closes its connection, the next operation reopens the same database. Concurrent Viewer, watcher and index requests share one open. Only transaction creation retries once; permission, quota and interrupted-transaction failures remain visible. Existing queues, saved chats, hashes and folder handles remain in place.
 

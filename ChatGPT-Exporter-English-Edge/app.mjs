@@ -21,6 +21,7 @@ import {createRenderScheduler} from './ui-scheduler.mjs';
 import {createDashboardStats} from './dashboard-state.mjs';
 import {setUserYield,userYieldStatus} from './live-settings.mjs';
 import {resolveBackupFolder,scanTranscriptInventory,readDetectedTranscript,mergeFolderMetadata} from './local-detection.mjs';
+import {restoreAccountFolder,rememberBackupFolders} from './account-folders.mjs';
 import {conversationRevisionText} from './conversation-revision.mjs';
 import {iterateLocalCopyCandidates,verifyLocalCopy} from './local-files.mjs';
 const $=id=>document.getElementById(id);
@@ -181,9 +182,20 @@ function migrateLoadedJob(j){
 }
 async function connect(expectedKey=null) {
   $('message').textContent='Connecting to your signed-in ChatGPT session…';await ensureTab();const result=await readyBridge(),nextScope={...result.scope,key:await digest(JSON.stringify([result.scope.user,result.scope.account || null]))};
-  if (expectedKey && nextScope.key!==expectedKey) throw new Paused('The account or workspace changed. Automatic resume stopped; reconnect to the original workspace.');await resetLocalIndex();scope=nextScope;connected=true;await db.put('meta','lastScope',scope);job=await db.get('jobs',scope.key) || null;if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`) || null;attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;root=null;rootDetection=null;backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;sensed.at=0;applyJobOptionsToUI();update();if (!job) $('message').textContent='Connected. Choose a folder, then start the automatic export.';
+  if (expectedKey && nextScope.key!==expectedKey) throw new Paused('The account or workspace changed. Automatic resume stopped; reconnect to the original workspace.');
+  if(scope)await rememberBackupFolders(db,scope.key,[backupInput,folder,...locations.filter(x=>x.role==='backup').map(x=>x.handle)]);
+  await resetLocalIndex();scope=nextScope;connected=true;await db.put('meta','lastScope',scope);job=await db.get('jobs',scope.key) || null;if(migrateLoadedJob(job))await db.put('jobs',scope.key,job);folder=await db.get('meta',`folder:${scope.key}`) || null;attachmentLibrary=await db.get('meta',`attachmentLibrary:${scope.key}`) || null;root=null;rootDetection=null;backupInput=await db.get('meta',`backupInput:${scope.key}`) || null;locations=await db.get('meta',`localLocations:${scope.key}`) || [];localAttachmentIndex=null;diskFiles=null;diskIndexEntries=null;sensed.at=0;notice='';localSummary='Looking for this account’s backup in previously granted folders…';applyJobOptionsToUI();update();
+  beginDetection();try{
+    const found=await restoreAccountFolder(db,scope.key,{folder,input:backupInput,locations,onProgress:s=>{localSummary='Finding this account’s backup · '+s.directories+' folders checked';update();}});
+    folder=found.folder;
+    if(folder){backupInput=found.input || null;await db.put('meta',`folder:${scope.key}`,folder);await db.put('meta',`backupInput:${scope.key}`,backupInput);await rememberLocation(backupInput,'backup');await rememberLocation(folder,'backup');
+      localSummary='Restored this account’s backup: '+found.resolved.path;if(!job||found.recovered)await detectLocalState();
+    }else{localSummary=found.status==='permission-needed'?'A remembered folder needs permission. Choose / detect backup folder to grant it again.':found.status==='ambiguous'?'Several backups match this account. Choose the one to use; account data stays separate.':found.status==='scan-limited'?'Automatic search reached its folder limit. Choose the closest shared backup parent to continue.':'No matching backup in granted folders. Choose your shared backup parent once to find this account’s folder.';notice=localSummary;}
+  }finally{endDetection();}
+  update();if(!job)$('message').textContent='Connected. '+localSummary;
 }
 async function rememberLocation(handle,role){
+  if(handle&&role==='backup')await rememberBackupFolders(db,scope.key,[backupInput,handle]);
   if(!handle)return;for(const x of locations)if(await x.handle.isSameEntry(handle)){x.role=x.role==='backup'?'backup':role;x.at=Date.now();await db.put('meta',`localLocations:${scope.key}`,locations);return;}
   locations.unshift({handle,role,name:handle.name,at:Date.now()});locations=locations.slice(0,8);await db.put('meta',`localLocations:${scope.key}`,locations);
 }
@@ -404,7 +416,7 @@ async function start(auto=false,observed=false) {
 function download(blob,name) {const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 function bind(id,handler) {$(id).addEventListener('click',()=>{if(installBusy)return;notice='';Promise.resolve().then(handler).catch(error);});}
 async function passiveTick(){
-  if(!job || !scope || !connected || !job.schedule?.enabled || job.schedule.suspended)return;job.schedule.lastTickAt=Date.now();if(passiveBusy || running){update();return;}passiveBusy=true;
+  if(connecting || detecting || starting || installBusy || !job || !scope || !connected || !job.schedule?.enabled || job.schedule.suspended)return;job.schedule.lastTickAt=Date.now();if(passiveBusy || running){update();return;}passiveBusy=true;
   try{
     const now=Date.now();
     if(!navigator.onLine){if(job.schedule.checkState!=='offline'){job.schedule.checkState='offline';job.schedule.checkError='Offline: waiting for an internet connection.';appendEvent(job,'Offline: network watcher deferred; saved files and queue retained.',now,'warn','network');await db.put('jobs',scope.key,job);}update();return;}
@@ -427,7 +439,7 @@ async function init() {
 
   addEventListener('online',()=>{if(job?.schedule){job.schedule.checkError=null;job.schedule.checkWaitUntil=0;}void passiveTick();});
   update();
-  bind('connect',async()=>{connecting=true;update();try{await connect();}finally{connecting=false;update();}});
+  bind('connect',async()=>{if(connecting)return;connecting=true;update();try{await connect();}finally{connecting=false;update();}});
   bind('folder',async()=>{
     if(!scope)throw new Paused('Connect to ChatGPT first.');const next=await showDirectoryPicker(pickerOptions('backup')),previous=root || folder;
     beginDetection();try{

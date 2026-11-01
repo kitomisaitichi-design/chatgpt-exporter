@@ -1,4 +1,12 @@
-# Validation for 2.4.22
+# Validation for 2.4.23
+
+251 Node regressions pass, including eighteen account-folder cases: migrated parent grants, explicit-folder priority, renamed/nested archives, no name-only ownership, conflicting/duplicate scope metadata, overlap deduplication, ambiguous copies, revoked permission, stale handles, shared directory/entry budgets, bounded large headers, reported legacy truncation and unchanged account records. Runtime syntax checks pass.
+
+An isolated Edge fixture reproduces the previous missing-folder state when switching from A to B despite an already granted parent containing B’s archive. After the fix it restores B’s renamed folder and saved chat, keeps A’s entries separate, survives refresh, switches A/B/A correctly and handles double Connect/Start without conversation-network requests or page errors. The fixture exposes click completion and initialization flags only in an isolated runtime copy to avoid guessing from UI frame timing. Production connection/detection logic is unchanged by the fixture; all data and directory handles are synthetic.
+
+Live private-account switching, a fresh current Viewer full import and activation in the user’s existing Edge profile are not claimed by these fixtures. The same-folder installation keeps Viewer adaptations and has a rollback copy. Browser activation requires Reload of the existing extension card and reconnecting to the selected account.
+
+## Earlier validation: 2.4.22
 
 233 Node regression tests pass, including eight storage-lifecycle cases: concurrent recovery, close/versionchange events, failed opens, bounded retries, permission/missing-store errors, quota/abort failures without replay, read completion and atomic batches. Runtime JS/MJS syntax checks pass.
 

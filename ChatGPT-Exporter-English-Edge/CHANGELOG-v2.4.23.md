@@ -1,0 +1,8 @@
+# 2.4.23 — restore the matching folder after account switches
+
+- Reconnecting restores the account’s explicit folder first. If it has no usable saved choice, search already granted backup parents and roots for exact matching scope metadata, including renamed/nested archives. Recover its local transcript counts without importing another account’s queue.
+- Migrate legacy remembered parent/root handles into a bounded internal registry. Search at most 400 directories and enumerate 4,000 entries across 32 locations, yielding processing every 8 ms. Read only 64 KiB metadata headers during discovery and normally verify the selected candidate before binding; retain full transcript verification when reconciling. Report legacy registry truncation visibly. No new exported schema or dependency.
+- Automatic discovery creates no folders, requests no new permissions and never treats a familiar filename as ownership proof. Ambiguous matches, stale/expired grants and scan limits show a clear next step. Grant a shared backup parent once to discover sibling archives; an individual account-folder grant does not grant access to its parent or siblings.
+- Coalesce double Connect and defer passive work during connection/detection so account changes cannot overlap queue work. Retain database recovery, image settings, failure memory, all eight themes and Viewer catalogs.
+
+Verification: 251 Node regressions and isolated Edge A/B/A switching, renamed-folder recovery, exact account separation, refresh and double Connect/Start with zero conversation-network requests. Live-account switching, full current Viewer import and existing-profile activation were not run. Reload the existing Edge extension card, refresh the dashboard, then reconnect.

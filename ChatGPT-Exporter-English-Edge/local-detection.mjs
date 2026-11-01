@@ -5,6 +5,7 @@ const missing=e=>['NotFoundError','TypeMismatchError'].includes(e.name);
 const safePath=p=>typeof p==='string'&&!p.includes('\\')&&!p.startsWith('/')&&p.split('/').every(x=>x&&x!=='.'&&x!=='..');
 const scopeOf=o=>o?.scope_key || o?.scope?.key || (typeof o?.scope==='string'?o.scope:null) || o?.job?.scope?.key;
 const yieldUI=()=>new Promise(resolve=>setTimeout(resolve,0));
+async function comparableEntry(a,b){try{return await sameLocalEntry(a,b);}catch(e){if(['NotAllowedError','SecurityError'].includes(e?.name))return false;throw e;}}
 export async function readLocalJSON(dir,name,maxBytes=64*1024*1024){
   try{const file=await(await dir.getFileHandle(name)).getFile();if(file.size>maxBytes)return null;return JSON.parse(await file.text());}catch(e){if(missing(e)||e instanceof SyntaxError)return null;throw e;}
 }
@@ -22,25 +23,36 @@ async function stateIdentity(dir){
     return schema==='english-autopilot-portable-state/v1'&&typeof key==='string'&&scope?.key===key&&typeof scope.user==='string'?scope:null;
   }catch(e){if(missing(e)||e instanceof SyntaxError)return null;throw e;}
 }
-async function marker(dir,key){
-  const index=await readLocalJSON(dir,'conversation-index.json'),state=await readLocalJSON(dir,'portable-state.json');
+async function markerHeader(dir,name){
+  try{const file=await(await dir.getFileHandle(name)).getFile();if(!file.slice&&file.size>64*1024)return null;const text=await(file.slice?file.slice(0,64*1024):file).text(),schema=headerValue(text,'schema');
+    if(name==='conversation-index.json')return schema==='chatgpt-conversation-index/v1'?{schema,scope:headerValue(text,'scope')}:null;
+    const scope_key=headerValue(text,'scope_key'),job=headerValue(text,'job',true),scope=job&&headerValue(job,'scope');return schema==='english-autopilot-portable-state/v1'?{schema,scope_key,job:{scope}}:null;
+  }catch(e){if(missing(e)||e instanceof SyntaxError)return null;throw e;}
+}
+async function marker(dir,key,headersOnly=false){
+  const index=headersOnly?await markerHeader(dir,'conversation-index.json'):await readLocalJSON(dir,'conversation-index.json'),state=headersOnly?await markerHeader(dir,'portable-state.json'):await readLocalJSON(dir,'portable-state.json');
   const identity=state?.job?.scope || (!state?await stateIdentity(dir):null);
-  const recognized=index?.schema==='chatgpt-conversation-index/v1'||state?.schema==='english-autopilot-portable-state/v1';
+  const recognized=index?.schema==='chatgpt-conversation-index/v1'||state?.schema==='english-autopilot-portable-state/v1'||!!identity;
   const keys=[scopeOf(index),scopeOf(state),identity?.key].filter(Boolean),foreign=keys.some(x=>x!==key);
   let layout=false;try{await dir.getDirectoryHandle('json');layout=true;}catch(e){if(!missing(e))throw e;}
   return {index,state,identity,recognized,foreign,match:recognized&&!foreign&&keys.includes(key),layout};
 }
-export async function resolveBackupFolder(selected,key,{maxDepth=4,maxDirectories=400,onProgress=()=>{}}={}){
-  const expected='chatgpt-backup-'+key.slice(0,12),first=await marker(selected,key);
-  if(!first.foreign&&(first.match || selected.name===expected))return {root:selected,path:selected.name,created:false,metadata:first,checked:1};
-  const queue=[{dir:selected,path:selected.name,depth:0}],matches=[];let checked=0,truncated=false;
-  while(queue.length){const {dir,path,depth}=queue.shift();if(++checked>maxDirectories){truncated=true;break;}if(checked%20===0){onProgress({directories:checked});await yieldUI();}
-    const m=dir===selected?first:await marker(dir,key);
-    if(!m.foreign&&(m.match || dir.name===expected)){matches.push({root:dir,path,created:false,metadata:m,checked});continue;}
+export async function resolveBackupFolder(selected,key,{maxDepth=4,maxDirectories=400,maxEntries=Infinity,onProgress=()=>{},existingOnly=false,strictScope=false,headersOnly=false,excludeRoots=[]}={}){
+  const expected='chatgpt-backup-'+key.slice(0,12),first=await marker(selected,key,headersOnly),matchesScope=(m,dir)=>!m.foreign&&(m.match || !strictScope&&dir.name===expected);
+  if(matchesScope(first,selected))return {root:selected,path:selected.name,created:false,metadata:first,checked:1};
+  const queue=[{dir:selected,path:selected.name,depth:0}],matches=[];let checked=0,enumerated=0,truncated=false,lastYield=Date.now();
+  while(queue.length){const {dir,path,depth}=queue.shift();if(dir!==selected&&(await Promise.all(excludeRoots.map(h=>comparableEntry(h,dir)))).some(Boolean))continue;if(checked>=maxDirectories){truncated=true;break;}checked++;if(checked%20===0){onProgress({directories:checked});await yieldUI();}
+    const m=dir===selected?first:await marker(dir,key,headersOnly);
+    if(matchesScope(m,dir)){matches.push({root:dir,path,created:false,metadata:m,checked});continue;}
     if(depth>=maxDepth)continue;
-    for await(const [name,handle] of dir.entries())if(handle.kind==='directory'&&!['attachments','markdown','attachment-errors','.git','node_modules',...(m.foreign?['json']:[])].includes(name))queue.push({dir:handle,path:path+'/'+name,depth:depth+1});
+    for await(const [name,handle] of dir.entries()){
+      if(enumerated>=maxEntries){truncated=true;queue.length=0;break;}enumerated++;
+      if(handle.kind==='directory'&&!['attachments','markdown','attachment-errors','.git','node_modules',...(m.foreign?['json']:[])].includes(name))queue.push({dir:handle,path:path+'/'+name,depth:depth+1});
+      if(Date.now()-lastYield>=8){onProgress({directories:checked,entries:enumerated});await yieldUI();lastYield=Date.now();}
+    }
   }
-  if(matches.length){matches.sort((a,b)=>Number(b.root.name===expected)-Number(a.root.name===expected)||a.path.split('/').length-b.path.split('/').length||a.path.localeCompare(b.path));return {...matches[0],candidates:matches.length,checked,truncated};}
+  if(matches.length){matches.sort((a,b)=>Number(b.root.name===expected)-Number(a.root.name===expected)||a.path.split('/').length-b.path.split('/').length||a.path.localeCompare(b.path));return {...matches[0],candidates:matches.length,checked,enumerated,truncated};}
+  if(existingOnly){if(!strictScope&&!first.foreign&&first.layout)return {root:selected,path:selected.name,created:false,metadata:first,checked,enumerated,truncated,legacy:true};return {root:null,checked,enumerated,truncated,candidates:0};}
   if(first.foreign || /^chatgpt-backup-[a-f0-9]{12}$/i.test(selected.name))throw Error('This backup belongs to a different account/workspace and contains no matching nested backup. Choose the matching backup or its parent folder.');
   // A legacy root with json/ or directly selected transcript subfolder is valid.
   let direct=false;for await(const [name,h] of selected.entries())if(h.kind==='file'&&/\.json$/i.test(name)&&!['conversation-index.json','portable-state.json','export-report.json'].includes(name)){const data=await readLocalJSON(selected,name,32*1024*1024);if(Array.isArray(data)?data.some(x=>validId(x?.conversation_id || x?.id)&&conversationValid(x,x.conversation_id || x.id)):validId(data?.conversation_id || data?.id)&&conversationValid(data,data.conversation_id || data.id)){direct=true;break;}}

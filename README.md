@@ -16,7 +16,7 @@
 
 Automatically export available ChatGPT conversations as **native JSON and readable Markdown**. Back up eligible uploads, generated images and Library files; reuse verified local content; and keep backup queues, revisions and file references together in a folder you choose.
 
-**Latest release — v2.4.22:** Repairs the “database connection is closing” failure affecting the Viewer queue, passive watcher and local index. Concurrent requests share a safe reconnect; committed progress stays in the existing database. Retains all eight themes, density controls and earlier chat/Library fixes. **[Read the v2.4.22 changes](release-notes/v2.4.22.md).**
+**Latest release — v2.4.23:** Reconnecting after an account switch restores its saved backup folder, or finds its matching archive inside previously granted backup parents. Renamed/nested backups work; account data stays separate. Retains the database recovery repair, all eight themes and earlier chat/Library fixes. **[Read the v2.4.23 changes](release-notes/v2.4.23.md).**
 
 ## Dashboard preview
 
@@ -35,6 +35,8 @@ Automatically export available ChatGPT conversations as **native JSON and readab
 No build tools are required. The GitHub source archives also work by selecting their extension subfolder.
 
 **Updating manually:** stop backup, keep a copy of the existing extension folder, replace runtime files in the same location, Reload its existing Edge extension card and refresh the dashboard. Reconnect and resume the same backup. Preserve optional Viewer/custom patches separately. Do not clear browser data or replace the extension identity.
+
+**Switching accounts:** reconnect after changing the signed-in account/workspace. The exporter restores that account’s remembered folder first, then searches already granted backup parents for exact scope metadata. Choose a shared parent once to allow discovery of sibling account archives; Edge cannot read an ungranted sibling or search the whole computer automatically. Ambiguous copies and expired permissions show a clear next step.
 
 **Automatic installation:** enable the optional idle switch and choose the actual installed extension folder. It verifies release assets and original runtime files before writing, keeps .exporter-rollback snapshots, and reloads after success. Unsupported customizations defer to manual installation. [Full behavior and rollback](docs/FEATURES.md#release-checks-and-optional-silent-installation).
 
