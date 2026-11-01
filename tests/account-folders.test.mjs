@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {restoreAccountFolder,rememberBackupFolders} from '../ChatGPT-Exporter-English-Edge/account-folders.mjs';
+import {restoreAccountFolder,rememberBackupFolders,reconnectRememberedFolderAccess} from '../ChatGPT-Exporter-English-Edge/account-folders.mjs';
 const A='a'.repeat(64),B='b'.repeat(64);
 class Dir{
  constructor(name,items={},permission='granted'){Object.assign(this,{name,kind:'directory',items,permission,created:0,reads:0});}
@@ -7,7 +7,7 @@ class Dir{
  async requestPermission(){throw Error('Automatic discovery must not request permission');}
  async isSameEntry(other){return this===other;}
  async getFileHandle(name){this.reads++;if(this.items[name]?.kind==='file')return this.items[name];throw new DOMException('Missing','NotFoundError');}
- async getDirectoryHandle(name,{create=false}={}){if(create){this.created++;throw Error('Automatic discovery must not create directories');}if(this.items[name]?.kind==='directory')return this.items[name];throw new DOMException('Missing','NotFoundError');}
+ async getDirectoryHandle(name,{create=false}={}){if(create){this.created++;if(!this.allowCreate)throw Error('Automatic discovery must not create directories');if(!this.items[name])this.items[name]=new Dir(name);}if(this.items[name]?.kind==='directory')return this.items[name];throw new DOMException('Missing','NotFoundError');}
  async *entries(){yield*Object.entries(this.items);}
 }
 const json=value=>({kind:'file',getFile:async()=>new Blob([JSON.stringify(value)])});
@@ -70,4 +70,37 @@ test('omitted legacy grants are reported as limited rather than a complete miss'
 });
 test('revoked exclusion handle cannot hide a later valid nested match',async()=>{
  const previous=archive('Previous',A),b=archive('B',B),parent=new Dir('Parent',{b}),db=database();let inspected=false;previous.entries=async function*(){inspected=true;};previous.isSameEntry=async other=>{if(inspected)throw new DOMException('Revoked','NotAllowedError');return previous===other;};await rememberBackupFolders(db,A,[previous,parent]);assert.equal((await restoreAccountFolder(db,B)).folder,b);
+});
+test('explicit connection prepares a dedicated new-account folder after a complete miss',async()=>{
+ const a=archive('Account A',A),parent=new Dir('Backups',{a}),db=database();parent.allowCreate=true;await rememberBackupFolders(db,A,[parent]);const found=await restoreAccountFolder(db,B,{createIfMissing:true});assert.equal(found.status,'created');assert.equal(found.folder.name,'chatgpt-backup-'+B.slice(0,12));assert.equal(found.input,parent);assert.equal(found.resolved.created,true);assert.equal(parent.items.a,a);assert.equal(a.created,0);assert.equal(parent.created,1);assert.deepEqual(Object.keys(found.folder.items),[]);
+});
+test('no parent grant means no invented path or new folder',async()=>{
+ const found=await restoreAccountFolder(database(),B,{createIfMissing:true});assert.equal(found.status,'not-found');assert.equal(found.folder,null);
+});
+test('background restoration keeps directory creation disabled by default',async()=>{
+ const parent=new Dir('Backups'),db=database();parent.allowCreate=true;await rememberBackupFolders(db,A,[parent]);assert.equal((await restoreAccountFolder(db,B)).folder,null);assert.equal(parent.created,0);
+});
+test('new account can get a dedicated child under a remembered foreign archive without adopting it',async()=>{
+ const parent=archive('Account A',A),db=database();parent.allowCreate=true;await rememberBackupFolders(db,A,[parent]);const found=await restoreAccountFolder(db,B,{createIfMissing:true});assert.notEqual(found.folder,parent);assert.equal(found.input,parent);assert.equal(found.folder.name,'chatgpt-backup-'+B.slice(0,12));assert.equal(found.resolved.metadata.foreign,false);assert.equal(parent.items['conversation-index.json'].kind,'file');
+});
+test('unverified occupied account-folder names preserve their existing files',async()=>{
+ const name='chatgpt-backup-'+B.slice(0,12),occupied=new Dir(name,{'keep.txt':json({keep:true})}),parent=new Dir('Backups',{[name]:occupied}),db=database();parent.allowCreate=true;await rememberBackupFolders(db,A,[parent]);const found=await restoreAccountFolder(db,B,{createIfMissing:true});assert.equal(found.status,'folder-conflict');assert.equal(parent.created,0);assert.equal(occupied.items['keep.txt'].kind,'file');
+});
+test('empty account directory left by interruption is reused without nested duplicates',async()=>{
+ const name='chatgpt-backup-'+B.slice(0,12),empty=new Dir(name),parent=new Dir('Backups',{[name]:empty}),db=database();await rememberBackupFolders(db,A,[parent]);const found=await restoreAccountFolder(db,B,{createIfMissing:true});assert.equal(found.status,'created');assert.equal(found.folder,empty);assert.equal(parent.created,0);assert.equal(empty.created,0);
+});
+test('ambiguity, scan limits and denied access never create a fallback',async()=>{
+ for(const parent of [new Dir('Ambiguous',{one:archive('One',B),two:archive('Two',B)}),new Dir('Denied',{},'prompt'),new Dir('Large',{one:new Dir('One'),two:new Dir('Two')})]){parent.allowCreate=true;const db=database();await rememberBackupFolders(db,A,[parent]);const found=await restoreAccountFolder(db,B,{createIfMissing:true,maxEntries:parent.name==='Large'?1:4000});assert.equal(found.folder,null);assert.equal(parent.created,0);}
+});
+test('invalid scope cannot create a folder and matching backups still win',async()=>{
+ const parent=new Dir('Backups'),db=database();parent.allowCreate=true;await rememberBackupFolders(db,A,[parent]);await assert.rejects(restoreAccountFolder(db,'unsafe/key',{createIfMissing:true}),/valid account scope/);assert.equal(parent.created,0);const b=archive('B',B);parent.items.b=b;assert.equal((await restoreAccountFolder(db,B,{createIfMissing:true})).folder,b);assert.equal(parent.created,0);
+});
+test('manual reconnect can renew one existing folder grant without a picker',async()=>{
+ const parent=new Dir('Known parent',{},'prompt'),db=database();let requests=0;parent.requestPermission=async()=>{requests++;parent.permission='granted';return 'granted';};await rememberBackupFolders(db,A,[parent]);assert.equal(await reconnectRememberedFolderAccess(db),true);assert.equal(requests,1);assert.equal(await reconnectRememberedFolderAccess(db),false);assert.equal(requests,1);
+});
+test('reconnect never invents a grant or prompts for an already granted or denied folder',async()=>{
+ const granted=new Dir('Granted'),denied=new Dir('Denied',{},'denied'),db=database();await rememberBackupFolders(db,A,[granted,denied]);assert.equal(await reconnectRememberedFolderAccess(db),false);assert.equal(await reconnectRememberedFolderAccess(database()),false);
+});
+test('renewing saved access prompts at most once and respects refusal',async()=>{
+ const one=new Dir('One',{},'prompt'),two=new Dir('Two',{},'prompt'),db=database();let requests=0;one.requestPermission=async()=>{requests++;return 'denied';};two.requestPermission=async()=>{throw Error('Must not ask for a second grant');};await rememberBackupFolders(db,A,[one,two]);assert.equal(await reconnectRememberedFolderAccess(db),false);assert.equal(requests,1);
 });

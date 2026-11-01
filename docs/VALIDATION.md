@@ -1,4 +1,10 @@
-# Validation for 2.4.23
+# Validation for 2.4.24
+
+262 Node regressions pass, including new-account setup under a permitted shared/foreign backup location, no-grant behavior, background creation disabled, occupied-name preservation, empty interrupted setup reuse, no creation on ambiguity/limits/permission faults, valid scope checks, existing-match priority and one saved-grant renewal respecting refusal.
+
+The isolated Edge account fixture now also connects a new C account with no folder mapping or archive: its own account folder is prepared automatically, A/B entries and the exact saved B job are unchanged, and repeated Connect plus refresh reuse one C folder without nesting. Switching back restores B’s saved chat. The fixture uses synthetic data and the actual filesystem/storage logic, with only initialization/click-completion signals exposed in its isolated runtime copy. No conversation-network requests or page errors. Original live-profile activation and live account changes remain separate from these checks.
+
+## Earlier validation: 2.4.23
 
 251 Node regressions pass, including eighteen account-folder cases: migrated parent grants, explicit-folder priority, renamed/nested archives, no name-only ownership, conflicting/duplicate scope metadata, overlap deduplication, ambiguous copies, revoked permission, stale handles, shared directory/entry budgets, bounded large headers, reported legacy truncation and unchanged account records. Runtime syntax checks pass.
 
