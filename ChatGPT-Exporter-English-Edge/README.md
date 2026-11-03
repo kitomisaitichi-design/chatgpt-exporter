@@ -3,7 +3,7 @@
 # ChatGPT Exporter
 ### Your conversations. Your files. Kept close.
 
-**English Autopilot for Microsoft Edge · v2.4.25**
+**English Autopilot for Microsoft Edge · v2.4.26**
 
 In Library, turn on **Prioritize archives up to 125 MB** to include ZIP, RAR, 7z, TAR and common compressed variants from Library and chat attachments. Eligible archives get earlier file turns while chat scheduling and download cooldowns still apply.
 

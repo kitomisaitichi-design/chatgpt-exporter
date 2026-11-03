@@ -17,6 +17,9 @@ export function downloadLimit(file, options) {
 }
 
 export function refreshArchiveEligibility(job) {
+  // Older attachment scans could omit archive-only MIME types entirely.
+  const discoverOldArchives = job.options?.prioritizeArchives === true &&
+    job.options.attachments !== false && !job.archiveAttachmentBackfillQueued;
   const updateFile = file => {
     if (file.historical || file.external || file.imageExcluded || file.localWriteSkipped ||
         file.parked || file.attempts >= 2 || file.status === 'saved' || file.size == null) return false;
@@ -43,10 +46,11 @@ export function refreshArchiveEligibility(job) {
     for (const file of entry.attachments || []) {
       if (updateFile(file)) reopened = true;
     }
-    if (reopened && entry.status === 'saved') {
+    if ((reopened || discoverOldArchives) && entry.status === 'saved') {
       if (!entry.attachmentPending) entry.attachmentRetryAt = 0;
       entry.attachmentPending = true;
       entry.attachmentCursor = 0;
     }
   }
+  if (discoverOldArchives) job.archiveAttachmentBackfillQueued = true;
 }

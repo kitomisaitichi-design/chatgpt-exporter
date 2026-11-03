@@ -3,13 +3,29 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
-import {newJob} from '../ChatGPT-Exporter-English-Edge/core.mjs';
+import {extractAttachments,newJob} from '../ChatGPT-Exporter-English-Edge/core.mjs';
 import {libraryState,libraryWork,mergeLibraryItem,normalizeLibraryItem} from '../ChatGPT-Exporter-English-Edge/library.mjs';
 import {ARCHIVE_FILE_LIMIT,STANDARD_FILE_LIMIT,downloadLimit,refreshArchiveEligibility} from '../ChatGPT-Exporter-English-Edge/archive-downloads.mjs';
 import {finishWork,pickWork} from '../ChatGPT-Exporter-English-Edge/work-scheduler.mjs';
 
 const scope = {key:'fixture',user:'fixture',account:'workspace'};
 const item = (id,name,size) => normalizeLibraryItem({file_id:id,file_name:name,file_size_bytes:size});
+
+test('archive-specific chat MIME types are discovered and old completed chats get one local pass', () => {
+  const data={mapping:{one:{message:{metadata:{attachments:[
+    {name:'fixture.7z',file_id:'file-sevenzip',mime_type:'application/x-7z-compressed',size:12_000_000},
+    {name:'fixture.zip',file_id:'file-zip',mime_type:'application/zip',size:12_000_000}
+  ]}}}}};
+  assert.equal(extractAttachments(data).length,2);
+  const job=newJob(scope,{prioritizeArchives:true});
+  const entry={status:'saved',attachmentScannedAt:10,attachments:[]};
+  job.entries.chat=entry;
+  refreshArchiveEligibility(job);
+  assert.equal(entry.attachmentPending,true);
+  entry.attachmentPending=false;
+  refreshArchiveEligibility(job);
+  assert.equal(entry.attachmentPending,false);
+});
 
 test('the opt-in raises only the archive cap and exact 125 MB is eligible', () => {
   const job=newJob(scope);

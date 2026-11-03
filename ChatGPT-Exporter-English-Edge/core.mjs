@@ -1,4 +1,6 @@
-export const VERSION = '2.4.25';
+import {isArchiveName} from './archive-downloads.mjs';
+
+export const VERSION = '2.4.26';
 // Persisted chat attachments can legitimately lack a native file ID or label.
 export const compareText = (a,b) => String(a ?? '').localeCompare(String(b ?? ''));
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -199,7 +201,7 @@ function attachmentFrom(a,nodeId,partIndex){
   const name=a.name || a.filename || a.file_name || a.title || `attachment-${partIndex ?? 0}`;
   const ext=String(name).split('.').pop()?.toLowerCase();
   const mime=a.mime_type || a.mime || (a.content_type==='image_asset_pointer'?'image/unknown':a.content_type) || '';
-  if(!(DOC_EXT.has(ext) || IMAGE_EXT.has(ext) || /^(?:image\/|text\/|application\/(?:json|xml|rtf|pdf|msword|vnd\.|octet-stream))/.test(mime)))return null;
+  if(!(isArchiveName(name) || DOC_EXT.has(ext) || IMAGE_EXT.has(ext) || /^(?:image\/|text\/|application\/(?:json|xml|rtf|pdf|msword|vnd\.|octet-stream))/.test(mime)))return null;
   const size=Number(a.file_size_bytes ?? a.size_bytes ?? a.size ?? a.file_size ?? a.bytes ?? 0) || null;
   const rawId=a.file_id || a.id || a.asset_pointer || a.asset_id || null;
   const id=pointerId(rawId) || pointerId(a.asset_pointer);

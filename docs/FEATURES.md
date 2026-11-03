@@ -1,6 +1,6 @@
 # Complete feature guide
 
-Exporter 2.4.25 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
+Exporter 2.4.26 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
 
 Automatic new-account setup: explicit Connect first searches existing archives. If a complete permitted search finds no match, it prepares `chatgpt-backup-<account key>` inside a remembered writable backup location, preserving other accounts. It reuses an empty interrupted setup, rejects occupied unverified names and never creates after ambiguous results, incomplete searches or lost access. Automatic/background reconnects keep creation disabled. Explicit Connect can renew one saved prompt-state grant before waiting for the network; a refusal never triggers another prompt or a folder picker. First-ever setup still requires a location grant.
 
@@ -41,7 +41,7 @@ Each file retains separate chat and Library source records in portable state and
 
 If one download route fails, the exporter tries bounded native file and conversation attachment routes with available source contexts. Failure attempts are shared by the linked file: **two failed transfer attempts**, then parking until explicit Retry. Cooldowns and Stop do not spend that budget. Chat-only retained records stay in the file workspace and Viewer catalog even if their current chat reference is removed. Library records remain when their chat is unavailable. Earlier verified versions stay separately cataloged when metadata/content changes.
 
-New automatic transfers from either source are **strictly below 10,000,000 bytes**. Larger files stay on the manual list, including chat-only files. Previously saved eligible legacy copies remain available. **Download images** applies to both sources. Use **Chat + Library**, **Chat attachments**, or **Retained source history** to inspect coverage; Details includes source names and disappearance explanations.
+Standard automatic transfers from both sources are **strictly below 10,000,000 bytes**. **Prioritize archives up to 125 MB** in Library raises the limit for eligible archive filenames. Larger files stay on the manual list. Previously saved eligible legacy copies remain available. **Download images** applies to both sources. Use **Chat + Library**, **Chat attachments**, or **Retained source history** to inspect coverage; Details includes source names and disappearance explanations.
 
 [OpenAI's Library documentation](https://help.openai.com/en/articles/20001052-using-library-to-manage-files-in-chatgpt) confirms that uploaded and created files can be saved in Library, and deleting a chat does not delete its Library files. It does not guarantee that deleting a Library file leaves its chat download usable. Recovery always depends on an accessible server route or a verified local copy.
 
@@ -117,7 +117,7 @@ To move a backup to another installation, copy the whole backup folder, connect 
 
 Leave **Auto-save** enabled in the Library panel. Library discovery and downloads interleave with chat text, bounded attachment passes and validation; **Scan Library / resume** starts a scan or resumes its saved queue. Folder/list pagination and error states remain in portable state. Library inventory refreshes every three hours while the passive watcher is enabled. Library failures do not convert saved transcripts into failed chats.
 
-The Library limit uses decimal MB: **strictly less than 10,000,000 bytes**. Known larger files are listed immediately; unknown-size streams are bounded and stopped when they exceed the limit. The same boundary now applies to new chat attachment transfers. Existing eligible legacy copies remain available. Large files are listed for manual access.
+Standard Library and chat attachment transfers must be **strictly less than 10,000,000 bytes**. The archive toggle permits eligible files up to and including **125,000,000 bytes**. Known oversized files go to the manual list and unknown-size streams stop when they exceed their limit. Existing eligible legacy copies remain available. Large files are listed for manual access.
 
 Use **Manual downloads** to filter the dashboard, or **Manual-download list** for a portable HTML list. Open the listed Library folder/source chat, find the filename and ID, and download it through ChatGPT. The manual list also records unavailable and permission-limited files for inspection. It opens ChatGPT pages rather than retaining expiring signed download URLs. Scanning supports known Library nodes and the Library query route; an unfamiliar response, repeated page or early end is reported as incomplete.
 

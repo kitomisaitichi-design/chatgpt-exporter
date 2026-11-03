@@ -16,7 +16,7 @@
 
 Automatically export available ChatGPT conversations as **native JSON and readable Markdown**. Back up eligible uploads, generated images and Library files; reuse verified local content; and keep backup queues, revisions and file references together in a folder you choose.
 
-**Latest release — v2.4.25.** In Library, turn on **Prioritize archives up to 125 MB** to include larger ZIP, RAR, 7z and TAR files from your Library and chat attachments. Eligible archives get earlier file turns with the existing chat schedule and cooldowns. [Release notes](release-notes/v2.4.25.md)
+**Latest release — v2.4.26.** In Library, turn on **Prioritize archives up to 125 MB** to include larger ZIP, RAR, 7z and TAR files from your Library and chat attachments. Eligible archives get earlier file turns with the existing chat schedule and cooldowns. [Release notes](release-notes/v2.4.26.md)
 
 ## Dashboard preview
 
@@ -58,7 +58,7 @@ The sticky section bar jumps to files, activity, appearance and setup. Links ope
 | **Resume and recovery** | Durable queues, local cache, portable checkpoints, nested-folder detection and reconciliation of actual saved files. |
 | **Passive watching** | Observed replies/body changes, bounded recent checks and scheduled full scans while Edge, dashboard and connected ChatGPT tab remain open. |
 | **One file workspace** | Uploaded/generated chat attachments and owned Library files share identity, content and failure memory while retaining independent sources. |
-| **Small automatic downloads** | New transfers strictly below **10,000,000 bytes**; larger, connected-provider and unavailable items stay visible in manual-download catalogs. |
+| **Automatic downloads** | Standard transfers under **10 MB**, plus optional archive transfers up to **125 MB**. Larger, connected-provider and unavailable files appear in manual-download catalogs. |
 | **Images on or off** | Persistent image preference across chats and Library; existing saved images remain available. |
 | **Verified reuse** | Native IDs and SHA-256 lookup; renamed identical bytes share a saved copy. Filename and size alone never prove equality. |
 | **Safe deduplication** | Incremental background linking; manual removal of freshly verified exact duplicates with reference updates and recovery journal. |
