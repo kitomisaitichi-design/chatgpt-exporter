@@ -1,4 +1,4 @@
-export const VERSION = '2.4.24';
+export const VERSION = '2.4.25';
 // Persisted chat attachments can legitimately lack a native file ID or label.
 export const compareText = (a,b) => String(a ?? '').localeCompare(String(b ?? ''));
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
@@ -121,7 +121,7 @@ export function markdown(data, id) {
   return lines.join('\n');
 }
 export function newJob(scope, options={}, now = Date.now()) {
-  const merged={archived:true,projects:true,assist:false,verify:true,mode:'index-first',attachments:true,downloadImages:true,passive:true,passiveHours:3,yieldUser:true,library:true,smartWatch:true,...options};
+  const merged={archived:true,projects:true,assist:false,verify:true,mode:'index-first',attachments:true,downloadImages:true,prioritizeArchives:false,passive:true,passiveHours:3,yieldUser:true,library:true,smartWatch:true,...options};
   return {version:VERSION, scope, created:now, updated:now, status:'ready', message:'Ready', options:merged, entries:{}, sources:[
     {key:'active', kind:'list', offset:0, done:false, seenPages:[], emptyChecks:0},
     ...(merged.archived ? [{key:'archived', kind:'list', offset:0, archived:true, done:false, seenPages:[], emptyChecks:0}] : []),

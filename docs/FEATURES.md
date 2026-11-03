@@ -1,6 +1,6 @@
 # Complete feature guide
 
-Exporter 2.4.24 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
+Exporter 2.4.25 · [Install and quick start](../README.md#install-in-edge) · [Every version](HISTORY.md) · [Appearance](APPEARANCE.md) · [Validation](VALIDATION.md)
 
 Automatic new-account setup: explicit Connect first searches existing archives. If a complete permitted search finds no match, it prepares `chatgpt-backup-<account key>` inside a remembered writable backup location, preserving other accounts. It reuses an empty interrupted setup, rejects occupied unverified names and never creates after ambiguous results, incomplete searches or lost access. Automatic/background reconnects keep creation disabled. Explicit Connect can renew one saved prompt-state grant before waiting for the network; a refusal never triggers another prompt or a folder picker. First-ever setup still requires a location grant.
 
@@ -22,7 +22,7 @@ Reset appearance only restores UI defaults. Backup queues, folder grants, retry 
 | Conversation backup | Native JSON and readable Markdown, oldest-first processing, content fingerprints, revision metadata, consistent transcript filenames, local cache/disk reuse, and truthful incomplete/error reporting. |
 | Passive watching | Completed-reply and body-change detection, recent metadata checks, fixed full-scan deadlines, adaptive quiet intervals, persisted schedule, watcher health, Stop/Start and reload recovery while Edge/dashboard/ChatGPT stay open. |
 | File downloads | Uploaded and generated files exposed by ChatGPT; chat attachments and owned Library folders; linked native IDs, bounded route fallbacks, checked byte sizes, error-envelope rejection, and chunked Stop/hold support. |
-| Size and images | New automatic transfers strictly under decimal 10 MB; searchable manual lists for larger, connected or unavailable files; persisted image download toggle for both sources. |
+| Size and images | Standard automatic transfers strictly under decimal 10 MB, with optional archive downloads up to 125 MB; searchable manual lists for larger, connected or unavailable files; persisted image download toggle for both sources. |
 | Deduplication and versions | SHA-256 content sharing across names/IDs, identity reuse before downloading, automatic bounded background linking, manual Deduplicate & smart scan for redundant-copy removal, numbered-copy families, date/revision evidence, size-only review suggestions, and retention of distinct content. |
 | Independent source history | Separate chat/Library presence, retained chat-only files, unavailable-chat records, missing Library items after complete scans, earlier verified versions, source names/links, and source filters. Missing references never remove saved copies. |
 | Download memory | Two failed file transfers shared by linked references, persistent parking, per-file or grouped explicit Retry, and no failure charge for server cooldowns or Stop. |
@@ -31,7 +31,7 @@ Reset appearance only restores UI defaults. Backup queues, folder grants, retry 
 | Recovery and portability | Same-folder queue/cache upgrades, account/workspace checks, disk-index reconciliation, portable-state import/export, cached transcript ZIP, adaptive pacing, offline waits, incomplete discovery repair and optional one-shot difficult-chat recovery. |
 | Local storage | Selected backup root, optional permitted existing-file folder, JSON/Markdown/binaries/catalogs/reports/portable checkpoints; no developer API key or external export service required. |
 
-The sections below explain the controls and their limits. **Current behavior takes precedence over historical release descriptions**: for example, all new automatic file transfers now share the strict decimal 10 MB limit, and unrelated local filename/size matches require a matching reported hash.
+The sections below explain the controls and their limits. **Current behavior takes precedence over historical release descriptions**: for example, standard automatic transfers share the strict decimal 10 MB limit, and unrelated local filename/size matches require a matching reported hash.
 
 ## One file, independent chat and Library references
 
@@ -94,7 +94,7 @@ Known error files are preserved for inspection under `attachment-errors/<convers
 
 If you have the original uploads on disk, choose **Choose existing files folder** and select an enclosing folder. For unrelated local files, the exporter requires a reported SHA-256 matching the actual bytes, along with any expected size, before reuse. Saved backup references with a matching native file ID are verified separately. A filename and size match alone cannot prove that an original is the correct file. Folder access requires your selection; the extension cannot search arbitrary folders without it.
 
-Attachment scope covers supported document, text, data, source-code files and optional images. New automatic transfers must be strictly below decimal 10 MB; saved legacy copies are locally checked within the earlier inclusive 10 MiB bound. Audio and video are excluded from the chat attachment pass. Deleted or unavailable server files can only be recovered if a usable original exists locally or becomes available from ChatGPT.
+Attachment scope covers supported document, text, data, source-code files and optional images. Standard automatic transfers must be strictly below decimal 10 MB. **Prioritize archives up to 125 MB** in Library also covers chat attachments with eligible archive filenames; saved legacy copies are locally checked within the earlier inclusive 10 MiB bound. Audio and video are excluded from the chat attachment pass. Deleted or unavailable server files can only be recovered if a usable original exists locally or becomes available from ChatGPT.
 
 ## Backup contents
 
@@ -142,7 +142,7 @@ Exporter 2.4.18 retains the `chatgpt-conversation-index/v1`, `chatgpt-library-in
 | Deduplicate & smart scan | Updated conversation and Library catalogs point to the surviving verified copy before redundant bytes are removed. Reopen Files & Library to refresh the catalog. |
 | Different file versions | Distinct content remains available as separate files. Preferred-version evidence and filters are presented in the exporter. |
 | Download images switched off | Already saved images remain available; excluded images remain cataloged for manual access. Enabling downloads resumes eligible images. |
-| Files at or above 10 MB | Download through the listed ChatGPT link, then use **Import downloaded copy** in the Viewer. Saved file downloads and source-chat navigation use the existing Viewer workflow. |
+| Files listed for manual download | Download through the listed ChatGPT link, then use **Import downloaded copy** in the Viewer. Saved file downloads and source-chat navigation use the existing Viewer workflow. |
 
 Keep the complete backup together: the Viewer needs the indexes and actual `attachments/` binaries. The cached-chat ZIP contains transcripts and metadata; compress the complete backup folder when transferring files between computers. Historical isolated exporter-to-Viewer checks ran against **Viewer 1.1.6**, release commit `5e2ff2c849f94824fb234b6f8c1232750139f12c`. They verify catalog loading, retained chat-only files after source disappearance, saved byte downloads, source-chat navigation, the current chat Files panel and text previews, and manual 10 MB imports without rebuilding message indexes.
 

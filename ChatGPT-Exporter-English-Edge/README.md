@@ -3,7 +3,9 @@
 # ChatGPT Exporter
 ### Your conversations. Your files. Kept close.
 
-**English Autopilot for Microsoft Edge · v2.4.24**
+**English Autopilot for Microsoft Edge · v2.4.25**
+
+In Library, turn on **Prioritize archives up to 125 MB** to include ZIP, RAR, 7z, TAR and common compressed variants from Library and chat attachments. Eligible archives get earlier file turns while chat scheduling and download cooldowns still apply.
 
 [Download the extension](https://github.com/kitomisaitichi-design/chatgpt-exporter/releases/latest) · [Complete feature guide](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/FEATURES.md) · [Every version](https://github.com/kitomisaitichi-design/chatgpt-exporter/blob/main/docs/HISTORY.md) · [Offline Chat Viewer](https://github.com/kitomisaitichi-design/chatgpt-viewer/releases/latest)
 

@@ -3,8 +3,9 @@ import {seedFileSources,observeFileSource,finishLibraryPresence,rememberFileResu
 import {beginLibraryScan,recordDiscovery,chooseLibrary,finishWork,schedulerState} from './work-scheduler.mjs';
 import {safeName,validId,epoch,compareText} from './core.mjs';
 import {validHash,analyzeFiles,applyImagePreference} from './file-intelligence.mjs';
+import {archivePriority,downloadLimit,STANDARD_FILE_LIMIT,ARCHIVE_FILE_LIMIT} from './archive-downloads.mjs';
 
-export const LIBRARY_LIMIT=10_000_000; // Decimal MB; the boundary itself is manual.
+export const LIBRARY_LIMIT=STANDARD_FILE_LIMIT+1; // Decimal MB; the boundary itself is manual.
 export const LIBRARY_INTERVAL=3*60*60*1000;
 export const LIBRARY_FAILURE_LIMIT=2;
 export function verifyLibraryTransferSize(preparedSize,actualSize,listedSize){
@@ -38,7 +39,7 @@ export function libraryPage(data) {
   const total=Number(body?.total ?? body?.total_count ?? body?.pagination?.total);
   return {items:list,cursor:cursor===null||cursor===''?null:String(cursor),cursorProvided:['next_cursor','nextCursor','cursor'].some(k=>Object.hasOwn(body,k)) || !!body?.pagination && Object.hasOwn(body.pagination,'next_cursor'),hasMore:body?.has_more ?? body?.hasMore ?? body?.pagination?.has_more ?? null,total:Number.isFinite(total)?total:null};
 }
-export function mergeLibraryItem(state,item,now=Date.now()) {
+export function mergeLibraryItem(state,item,now=Date.now(),options) {
   if(item.directory){state.directories[item.id]=item;return false;}
   const old=state.entries[item.id],reportedHash=validHash(item.remoteSha256);
   if(old){
@@ -56,10 +57,12 @@ export function mergeLibraryItem(state,item,now=Date.now()) {
   const changed=old && !sameKnownContent && ((reportedHash && reportedHash!==old.remoteSha256 && reportedHash!==old.sha256) || (item.size!==null && old.size!==null && item.size!==old.size) || epoch(item.updated)>epoch(old.updated));
   if(changed)item.remoteSha256=reportedHash;
   const parked=!!old?.parked || (old?.attempts || 0)>=LIBRARY_FAILURE_LIMIT && old?.status!=='saved';
-  const status=parked?'unavailable':item.external || item.size!==null && item.size>=LIBRARY_LIMIT?'manual':!old||changed?'pending':old.status;
+  const sizeLimited=item.size!=null && item.size>downloadLimit(item,options);
+  const status=parked?'unavailable':old?.status==='saved'&&!changed?'saved':item.external || sizeLimited?'manual':!old||changed?'pending':old.status;
   // A pacing check can observe this file while its transfer is in flight. Keep
   // the queue object stable so the transfer's result cannot land on an orphan.
   const next={...old,...item,conversationIds:[...new Set([...(old?.conversationIds || []),...item.conversationIds])],status,parked,seenAt:now,firstSeenAt:old?.firstSeenAt || now,...changed&&!parked?{path:null,sha256:null,duplicateOf:null,duplicate:false,refresh:true,...old?.attempts?{}:{retryAt:0,attempts:0,error:null}}:{}};
+  next.sizeLimited=sizeLimited && status==='manual';
   state.entries[item.id]=old?Object.assign(old,next):next;
   return !old || changed;
 }
@@ -77,7 +80,9 @@ export function libraryWork(job,now=Date.now()) {
   const source=s.sources.filter(x=>!x.done&&!x.error || x.error&&x.failures<3&&(x.retryAt || 0)<=now).sort((a,b)=>(a.lastPageAt || 0)-(b.lastPageAt || 0))[0];
   const candidates=[...Object.values(s.entries),...(job.options?.attachments!==false?Object.values(job.fileLinks.sources).filter(x=>x.sourceKind==='chat'&&!x.historical):[])];
   const file=candidates.filter(x=>!x.external&&!x.parked&&(x.attempts || 0)<LIBRARY_FAILURE_LIMIT&&['pending','deferred'].includes(x.status)&&(x.retryAt || 0)<=now).sort((a,b)=>(a.size??LIBRARY_LIMIT)-(b.size??LIBRARY_LIMIT) || compareText(a.id ?? a.sourceKey ?? a.name,b.id ?? b.sourceKey ?? b.name));
-  if((schedulerState(job,now).lanes['library-file']?.turns || 0)%4===3)file.sort((a,b)=>(a.firstSeenAt || epoch(a.created) || now)-(b.firstSeenAt || epoch(b.created) || now)||(a.size??LIBRARY_LIMIT)-(b.size??LIBRARY_LIMIT));
+  const oldestTurn=(schedulerState(job,now).lanes['library-file']?.turns || 0)%4===3;
+  if(oldestTurn)file.sort((a,b)=>(a.firstSeenAt || epoch(a.created) || now)-(b.firstSeenAt || epoch(b.created) || now)||(a.size??LIBRARY_LIMIT)-(b.size??LIBRARY_LIMIT));
+  else if(job.options.prioritizeArchives)file.sort((a,b)=>Number(archivePriority(b,job.options))-Number(archivePriority(a,job.options)));
   const lookup=createFileLookup(job),next=file.find(x=>!sharedFileBudget(job,x,lookup).parked);
   return chooseLibrary(job,source,next,now);
 }
@@ -116,7 +121,7 @@ export function recordLibraryFailure(file,result,now=Date.now()) {
 }
 export function libraryIndex(job) {
   seedFileSources(job);applyImagePreference(job);const s=libraryState(job),rows=retainedFileRows(job),analysis=analyzeFiles(rows),entries=rows.sort((a,b)=>compareText(a.name,b.name)).map(({id,fileId,libraryId,name,size,mime,parent,created,updated,conversationIds=[],status,path,sha256,savedAt,error,attempts=0,parked=false,parkedAt,lastFailureStatus,lastFailureAt,uploaded,firstModified,firstSeenAt,remoteSha256,duplicateOf,duplicate,imageExcluded,sourceRefs=[],historical=false})=>({id,source_refs:sourceRefs,historical,uploaded:uploaded || null,first_modified:firstModified || null,first_seen_at:firstSeenAt || null,remote_sha256:remoteSha256 || null,duplicate_of:duplicateOf || null,duplicate:analysis.get(id)?.duplicate || (duplicate?{isAlias:true,canonicalId:duplicateOf}:null),version_info:analysis.get(id)?.version || null,image_excluded:!!imageExcluded,native_file_id:fileId,file_id:historical?id:fileId,library_file_id:libraryId,name,size,mime,parent,created,updated,conversation_ids:conversationIds,status,attempts,parked,parked_at:parkedAt || null,last_failure_status:lastFailureStatus || null,last_failure_at:lastFailureAt || null,path:path || null,expected_path:path || libraryPath({id,name}),sha256:sha256 || null,saved_at:savedAt || null,error:error || null,manual_url:parent?`https://chatgpt.com/library/d/${encodeURIComponent(parent)}`:`https://chatgpt.com/library?search=${encodeURIComponent(name)}`,conversation_urls:conversationIds.map(id=>`https://chatgpt.com/c/${encodeURIComponent(id)}`)}));
-  return {schema:'chatgpt-library-index/v1',version:job.version,generated_at:new Date().toISOString(),scope_key:job.scope.key,automatic_download_limit_bytes:LIBRARY_LIMIT,limit_rule:'strictly-less-than',download_images:job.options?.downloadImages!==false,deduplication:s.deduplication || null,failure_limit:LIBRARY_FAILURE_LIMIT,coverage_scope:'ChatGPT files and owned folders; connected-provider folders are listed for manual access.',state:s.state || 'ready',coverage_complete:!!s.lastScanAt && s.sources.length>0 && s.sources.every(x=>x.done&&!x.error&&!x.unsupported),last_scan_at:s.lastScanAt || null,next_scan_at:s.nextScanAt,discovery:s.sources.map(({key,parent,mode,done,error,offset,unsupported=0})=>({key,parent,mode,done,items_seen:offset || 0,unsupported,error:error || null})),directories:Object.values(s.directories),entries};
+  return {schema:'chatgpt-library-index/v1',version:job.version,generated_at:new Date().toISOString(),scope_key:job.scope.key,automatic_download_limit_bytes:LIBRARY_LIMIT,limit_rule:'strictly-less-than',archive_download_limit_bytes:job.options?.prioritizeArchives===true?ARCHIVE_FILE_LIMIT:null,download_images:job.options?.downloadImages!==false,deduplication:s.deduplication || null,failure_limit:LIBRARY_FAILURE_LIMIT,coverage_scope:'ChatGPT files and owned folders; connected-provider folders are listed for manual access.',state:s.state || 'ready',coverage_complete:!!s.lastScanAt && s.sources.length>0 && s.sources.every(x=>x.done&&!x.error&&!x.unsupported),last_scan_at:s.lastScanAt || null,next_scan_at:s.nextScanAt,discovery:s.sources.map(({key,parent,mode,done,error,offset,unsupported=0})=>({key,parent,mode,done,items_seen:offset || 0,unsupported,error:error || null})),directories:Object.values(s.directories),entries};
 }
 export function manualFiles(job){return libraryIndex(job).entries.filter(x=>x.status!=='saved');}
 export function linkedLibraryFiles(job,id){return libraryIndex(job).entries.filter(x=>x.conversation_ids.includes(id));}
@@ -136,7 +141,7 @@ export async function processLibrary(engine,work) {
       const knownBefore=Object.keys(s.entries).length,page=libraryPage(response.data),ids=page.items.map(x=>normalizeLibraryItem(x,source.parent)?.id || ''),fingerprint=JSON.stringify(ids);
       if(page.items.length&&source.seen.includes(fingerprint))throw Error('Library repeated a page; stopped to avoid a download loop.');
 
-      for(const raw of page.items){const item=normalizeLibraryItem(raw,source.parent);if(!item){source.unsupported=(source.unsupported || 0)+1;continue;}if(!source.seenIds.includes(item.id))source.seenIds.push(item.id);mergeLibraryItem(s,item,now());if(!item.directory)observeFileSource(j,s.entries[item.id],'library',null,now());if(item.directory && !item.external && !s.sources.some(x=>x.parent===item.id)){if(s.sources.length>=2000){source.unsupported=(source.unsupported || 0)+1;continue;}s.sources.push({key:item.id,parent:item.id,mode:'nodes',cursor:null,offset:0,done:false,seen:[],seenIds:[],failures:0});}}
+      for(const raw of page.items){const item=normalizeLibraryItem(raw,source.parent);if(!item){source.unsupported=(source.unsupported || 0)+1;continue;}if(!source.seenIds.includes(item.id))source.seenIds.push(item.id);mergeLibraryItem(s,item,now(),j.options);if(!item.directory)observeFileSource(j,s.entries[item.id],'library',null,now());if(item.directory && !item.external && !s.sources.some(x=>x.parent===item.id)){if(s.sources.length>=2000){source.unsupported=(source.unsupported || 0)+1;continue;}s.sources.push({key:item.id,parent:item.id,mode:'nodes',cursor:null,offset:0,done:false,seen:[],seenIds:[],failures:0});}}
       if(page.cursor===source.cursor && page.cursor)throw Error('Library repeated its pagination cursor.');
       if(page.items.length)source.seen.push(fingerprint);
       source.offset+=page.items.length;source.cursor=page.cursor;
@@ -148,7 +153,7 @@ export async function processLibrary(engine,work) {
     }catch(e){if(e.name==='Paused'||localStorageFailure(e))throw e;source.failures=(source.failures || 0)+1;source.error=e.message;source.retryAt=now()+Math.min(6*3600000,60000*2**source.failures);s.state='incomplete';if(e.status===429)engine.io.libraryLimit?.(e);if([401,403,409].includes(e.status)){source.failures=3;source.retryAt=0;}engine.event(`Library discovery deferred: ${e.message}. Chat backups can continue.`,'warn','library');}
   }else{
     const f=work.file,budget=sharedFileBudget(j,f);if(budget.attempts>(f.attempts || 0))f.attempts=budget.attempts;j.phase='library-file';j.message=`Saving file: ${f.name}`;await engine.save();
-    try{const result=await engine.io.libraryDownload(f,async()=>{await engine.paceRequest('asset');});Object.assign(f,result);if(result.localPending){f.status='deferred';f.retryAt=now()+250;f.error=null;}else if(f.status==='saved'){f.localPending=false;f.savedAt=now();f.error=null;f.retryAt=0;f.parked=false;engine.event(`Library ${f.duplicate?'reused identical content':'saved'}: ${f.name} (${f.size} bytes).`,'info','library');}else if(f.status==='manual'){f.retryAt=0;engine.event(`Library manual download: ${f.name}.`,'info','library');}else if(result.httpStatus===429){f.status='deferred';f.retryAt=now()+120000;engine.io.libraryLimit?.({retryAfter:result.retryAfter});engine.event('Library downloads waiting for the server cooldown. Failure counts are unchanged.','warn','library');}else{recordLibraryFailure(f,result,now());engine.event(`Library ${f.parked?'parked':'failed'} ${f.attempts}/${LIBRARY_FAILURE_LIMIT}: ${f.name} — ${f.error}${f.parked?' · skipped until you explicitly retry it':''}.`,'warn','library');}}
+    try{const result=await engine.io.libraryDownload(f,async()=>{if(await engine.paceRequest('asset')===false){const deferred=new Error('File turn deferred until the network read check.');deferred.name='YieldAttachments';throw deferred;}});Object.assign(f,result);if(result.localPending){f.status='deferred';f.retryAt=now()+250;f.error=null;}else if(f.status==='saved'){f.localPending=false;f.savedAt=now();f.error=null;f.retryAt=0;f.parked=false;engine.event(`Library ${f.duplicate?'reused identical content':'saved'}: ${f.name} (${f.size} bytes).`,'info','library');}else if(f.status==='manual'){f.retryAt=0;engine.event(`Library manual download: ${f.name}.`,'info','library');}else if(result.httpStatus===429){f.status='deferred';f.retryAt=now()+120000;engine.io.libraryLimit?.({retryAfter:result.retryAfter});engine.event('Library downloads waiting for the server cooldown. Failure counts are unchanged.','warn','library');}else{recordLibraryFailure(f,result,now());engine.event(`Library ${f.parked?'parked':'failed'} ${f.attempts}/${LIBRARY_FAILURE_LIMIT}: ${f.name} — ${f.error}${f.parked?' · skipped until you explicitly retry it':''}.`,'warn','library');}}
     catch(e){if(e.name==='Paused'||localStorageFailure(e))throw e;if(e.name==='YieldAttachments'){f.retryAt=now()+60000;}else{recordLibraryFailure(f,{error:e.message,httpStatus:e.status},now());engine.event(`Library ${f.parked?'parked':'failed'} ${f.attempts}/${LIBRARY_FAILURE_LIMIT}: ${f.name} — ${e.message}.`,'warn','library');}}
   }
   if(work.file){rememberFileResult(j,work.file,{...work.file},{now:now()});finishWork(j,'library-file',{savedFile:work.file.status==='saved',now:now()});}else finishWork(j,'library-scan',{now:now()});

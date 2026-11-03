@@ -16,7 +16,7 @@
 
 Automatically export available ChatGPT conversations as **native JSON and readable Markdown**. Back up eligible uploads, generated images and Library files; reuse verified local content; and keep backup queues, revisions and file references together in a folder you choose.
 
-**Latest release — v2.4.24:** Connect finds the account’s existing backup first. When a new account has no matching archive after a complete search, it automatically prepares a separate account folder in a remembered, accessible backup location. Connect can renew one saved folder grant without making you browse for its path. **[Read the v2.4.24 changes](release-notes/v2.4.24.md).**
+**Latest release — v2.4.25.** In Library, turn on **Prioritize archives up to 125 MB** to include larger ZIP, RAR, 7z and TAR files from your Library and chat attachments. Eligible archives get earlier file turns with the existing chat schedule and cooldowns. [Release notes](release-notes/v2.4.25.md)
 
 ## Dashboard preview
 

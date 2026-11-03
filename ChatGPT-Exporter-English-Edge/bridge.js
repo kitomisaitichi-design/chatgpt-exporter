@@ -94,13 +94,19 @@
     if(Date.now()>=deadline)return {status:504,error:'Attachment download timed out.'};
     let response=await originalFetch(url.href,{method:'GET',credentials:url.origin===location.origin?'include':'omit',headers:url.origin===location.origin?authHeaders(scope):undefined,signal:AbortSignal.timeout(Math.max(1,deadline-Date.now()))});
     if(!response.ok)return {status:response.status,retryAfter:response.headers.get('retry-after')};
-    const length=Number(response.headers.get('content-length') || 0);if(length>maxBytes){await response.body?.cancel().catch(()=>{});return {tooLarge:true,size:length};}
     const type=response.headers.get('content-type') || '';
+    // Link metadata stays small even when the eventual file is a large archive.
+    const bodyLimit=type.includes('json')?Math.min(maxBytes,10*1024*1024):maxBytes;
+    const length=Number(response.headers.get('content-length') || 0);if(length>bodyLimit){await response.body?.cancel().catch(()=>{});return {tooLarge:true,size:length};}
     const dispositionName=response.headers.get('content-disposition')?.match(/filename\s*=\s*"?([^";]+)/i)?.[1]?.trim();
     if(excludeImages && (/^image\//i.test(type) || imageName(dispositionName))){await response.body?.cancel().catch(()=>{});return {imageExcluded:true,type};}
     const chunks=[];let size=0;
-    if(response.body){const reader=response.body.getReader();try{for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>maxBytes){await reader.cancel().catch(()=>{});return {tooLarge:true,size};}chunks.push(part.value);}}finally{reader.releaseLock();}}
-    else{const bytes=new Uint8Array(await response.arrayBuffer());size=bytes.length;if(size>maxBytes)return {tooLarge:true,size};chunks.push(bytes);}
+    if(response.body){const reader=response.body.getReader();try{for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>bodyLimit){await reader.cancel().catch(()=>{});return {tooLarge:true,size};}chunks.push(part.value);}}finally{reader.releaseLock();}}
+    else{const bytes=new Uint8Array(await response.arrayBuffer());size=bytes.length;if(size>bodyLimit)return {tooLarge:true,size};chunks.push(bytes);}
+    if(maxBytes>10*1024*1024 && !type.includes('json')){
+      if(/^text\/html\b/i.test(type))return {status:403,error:'Attachment route returned HTML instead of archive bytes.'};
+      return {blob:new Blob(chunks,{type}),type,size,disposition:response.headers.get('content-disposition') || ''};
+    }
     const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
     if(type.includes('json')){
       let obj;try{obj=await new Response(bytes).json();}catch{if(url.origin===location.origin && url.pathname!=='/backend-api/estuary/content')return {status:502,error:'Malformed attachment JSON response.'};}
@@ -134,15 +140,18 @@
         // pin the explicit workspace saved with this backup, while still requiring
         // the same signed-in user.
         if(!args.scope || args.scope.user!==user)return {ok:false,status:409,kind:'account',error:'The signed-in user changed. Reconnect before retrieving attachments.'};
-        const max=Math.min(10*1024*1024,Math.max(1,Number(args.maxBytes)||10*1024*1024)),candidates=[...(args.candidates || [])];
+        const archive = args.archive === true;
+        const max=Math.min(archive?125_000_000:10*1024*1024,Math.max(1,Number(args.maxBytes)||10*1024*1024)),candidates=[...(args.candidates || [])];
         const libraryRoute=args.library&&args.fileId?libraryRoutes.get(args.fileId):null;if(libraryRoute&&scoped(libraryRoute))candidates.unshift(libraryRoute.url);
         const remembered=args.fileId?fileRoutes.get(args.fileId):null;if(remembered?.path && (!remembered.scope?.user || remembered.scope.user===args.scope.user))candidates.unshift(remembered.path);
-        const deadline=Date.now()+60000;let last=null;const attempts=[];for(const candidate of [...new Set(candidates)].slice(0,5)){const got=await fetchAssetCandidate(candidate,args.scope,max,new Set(),deadline,args.excludeImages===true);if(!got)continue;attempts.push({route:new URL(candidate,location.origin).pathname,status:got.status || (got.tooLarge?413:200)});if(got.status===429 || got.status===401)return {ok:false,status:got.status,retryAfter:got.retryAfter,error:got.error,attempts};if(got.status){last=got;continue;}if(got.imageExcluded)return {ok:false,status:200,imageExcluded:true,type:got.type,error:'Image downloads are switched off.',attempts};if(got.tooLarge)return {ok:false,status:413,size:got.size,error:'Attachment exceeds the 10 MB limit.',attempts};const key=crypto.randomUUID();preparedAssets.set(key,{...got,at:Date.now(),ownerUser:args.scope.user});while(preparedAssets.size>3)preparedAssets.delete(preparedAssets.keys().next().value);return {ok:true,status:200,key,size:got.size,type:got.type,disposition:got.disposition,attempts};}return {ok:false,status:last?.status || 404,error:last?.error || 'No readable attachment download route was available.',attempts};
+        const deadline=Date.now()+(archive?180000:60000);let last=null;const attempts=[];for(const candidate of [...new Set(candidates)].slice(0,5)){const got=await fetchAssetCandidate(candidate,args.scope,max,new Set(),deadline,args.excludeImages===true);if(!got)continue;attempts.push({route:new URL(candidate,location.origin).pathname,status:got.status || (got.tooLarge?413:200)});if(got.status===429 || got.status===401)return {ok:false,status:got.status,retryAfter:got.retryAfter,error:got.error,attempts};if(got.status){last=got;continue;}if(got.imageExcluded)return {ok:false,status:200,imageExcluded:true,type:got.type,error:'Image downloads are switched off.',attempts};if(got.tooLarge)return {ok:false,status:413,size:got.size,error:'Attachment exceeds its automatic-download limit.',attempts};const key=crypto.randomUUID();preparedAssets.set(key,{...got,at:Date.now(),ownerUser:args.scope.user});while(preparedAssets.size>3)preparedAssets.delete(preparedAssets.keys().next().value);return {ok:true,status:200,key,size:got.size,type:got.type,disposition:got.disposition,attempts};}return {ok:false,status:last?.status || 404,error:last?.error || 'No readable attachment download route was available.',attempts};
       }
       // assetPrepare already authenticated and fetched the bytes. Chunking/releasing
       // those prepared bytes is local page-memory work, so a volatile workspace
       // header must not invalidate it. Keep the signed-in user boundary only.
-      if(args.op==='assetChunk'){const a=preparedAssets.get(args.key);if(!a)return {ok:false,status:404,error:'Prepared attachment expired.'};if(a.ownerUser && a.ownerUser!==user)return {ok:false,status:409,kind:'account',error:'The signed-in user changed while reading a prepared attachment.'};const start=Math.max(0,Number(args.offset)||0),end=Math.min(a.bytes.length,start+Math.min(384*1024,Number(args.length)||384*1024));return {ok:true,status:200,offset:start,next:end,done:end>=a.bytes.length,base64:toBase64(a.bytes.subarray(start,end))};}
+      if(args.op==='assetChunk'){const a=preparedAssets.get(args.key);if(!a)return {ok:false,status:404,error:'Prepared attachment expired.'};if(a.ownerUser && a.ownerUser!==user)return {ok:false,status:409,kind:'account',error:'The signed-in user changed while reading a prepared attachment.'};const total=a.size;
+        const start=Math.max(0,Number(args.offset)||0),end=Math.min(total,start+Math.min(384*1024,Number(args.length)||384*1024));const bytes=a.blob?new Uint8Array(await a.blob.slice(start,end).arrayBuffer()):a.bytes.subarray(start,end);
+        return {ok:true,status:200,offset:start,next:end,done:end>=total,base64:toBase64(bytes)};}
       if(args.op==='assetRelease'){const a=preparedAssets.get(args.key);if(a?.ownerUser && a.ownerUser!==user)return {ok:false,status:409,kind:'account',error:'The signed-in user changed while releasing a prepared attachment.'};preparedAssets.delete(args.key);return {ok:true,status:204};}
       if (!matches(args.scope)) return {ok:false,status:409,kind:'account',error:'The signed-in user or workspace changed. Reconnect to the original workspace before resuming.'};
       if (args.op === 'peek') {const entry = captured.get(args.id);if (entry && entry.at >= args.since && (!entry.scope.user || entry.scope.user === user) && (entry.scope.account || null) === (args.scope.account || null)) return {ok:true,status:200,data:entry.data};return {ok:true,status:204,limit:lastLimit};}

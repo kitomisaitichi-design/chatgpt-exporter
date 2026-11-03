@@ -2,6 +2,7 @@ import {missingLocalFile} from './local-io.mjs';
 import {fileReferences,relatedFiles,compatibleFile,rememberFileResult,createFileLookup,registerFileReference,invalidateFileLookup} from './file-links.mjs';
 export {fileReferences} from './file-links.mjs';
 import {epoch,safeName,attachmentError,ATTACHMENT_MAX_BYTES,compareText} from './core.mjs';
+import {ARCHIVE_FILE_LIMIT,downloadLimit,isArchiveName} from './archive-downloads.mjs';
 
 export function contentFileName(value,max=64){const name=String(value || 'file'),ext=name.match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';return safeName(ext?name.slice(0,-ext.length):name,max-ext.length)+ext;}
 export const validHash=value=>typeof value==='string' && /^[a-f0-9]{64}$/i.test(value)?value.toLowerCase():null;
@@ -9,7 +10,7 @@ export const isImage=file=>/^image\//i.test(file?.mime || file?.mime_type || '')
 export function applyImagePreference(job){
   for(const f of fileReferences(job)){
     if(job.options?.downloadImages===false && isImage(f) && f.status!=='saved' && !f.parked){f.imageExcluded=true;f.status='manual';}
-    else if(job.options?.downloadImages!==false && f.imageExcluded){f.imageExcluded=false;f.status=f.parked?'unavailable':f.external || f.size!==null&&f.size>=10_000_000?'manual':'pending';}
+    else if(job.options?.downloadImages!==false && f.imageExcluded){f.imageExcluded=false;f.status=f.parked?'unavailable':f.external || f.size!=null&&f.size>downloadLimit(f,job.options)?'manual':'pending';}
   }
 }
 export const safeContentPath=value=>typeof value==='string' && value.startsWith('attachments/') && !value.includes('\\') && !/[\x00-\x1f]/.test(value) && value.split('/').every(p=>p && p!=='.' && p!=='..');
@@ -51,7 +52,7 @@ export class ContentStore {
   constructor(getJob,{read,write,remove,commit,onWrite=async()=>{},checkpoint=async()=>{},now=()=>Date.now()}){Object.assign(this,{getJob,read,write,remove,commit,onWrite,checkpoint,now});this.reset();}
   reset(){this.verified=new Map();this.canonical=new Map();this.queue=[];this.queued=new Set();this.lookup=null;this.owner=this.getJob();}
   references(){const job=this.getJob();if(this.owner!==job)this.reset();return this.lookup=createFileLookup(job);}
-  async inspect(path,maxBytes=ATTACHMENT_MAX_BYTES,{fresh=false}={}){
+  async inspect(path,maxBytes=isArchiveName(path)?ARCHIVE_FILE_LIMIT:ATTACHMENT_MAX_BYTES,{fresh=false}={}){
     if(!safeContentPath(path))throw Error('Unsafe attachment path.');
     const blob=await this.read(path);if(blob.size===0 || blob.size>maxBytes || attachmentError(await blob.slice(0,8192).text()))throw Error('Local file is empty, too large, or an error response.');
     const prior=this.verified.get(path),unchanged=prior&&(prior.blob===blob || Number.isFinite(blob.lastModified)&&prior.blob.lastModified===blob.lastModified&&prior.blob.size===blob.size);
@@ -130,8 +131,8 @@ export class ContentStore {
       await this.checkpoint();
       try{
         if(!safeContentPath(item.from)||!safeContentPath(item.to)||item.from===item.to || referencedPaths.has(item.from))continue;
-        const canonical=await this.inspect(item.to,ATTACHMENT_MAX_BYTES,{fresh:true});if(canonical.hash!==item.sha256 || canonical.blob.size!==item.size)throw Error('Canonical copy changed; duplicate kept.');
-        let duplicate;try{duplicate=await this.inspect(item.from,ATTACHMENT_MAX_BYTES,{fresh:true});}catch(e){if(e.name==='NotFoundError'){state.deduplication.pending=state.deduplication.pending.filter(x=>x!==item);continue;}throw e;}
+        const canonical=await this.inspect(item.to,undefined,{fresh:true});if(canonical.hash!==item.sha256 || canonical.blob.size!==item.size)throw Error('Canonical copy changed; duplicate kept.');
+        let duplicate;try{duplicate=await this.inspect(item.from,undefined,{fresh:true});}catch(e){if(e.name==='NotFoundError'){state.deduplication.pending=state.deduplication.pending.filter(x=>x!==item);continue;}throw e;}
         if(duplicate.hash!==item.sha256 || duplicate.blob.size!==item.size)throw Error('Duplicate copy changed; kept for inspection.');
         await this.checkpoint();await this.remove(item.from);this.verified.delete(item.from);removed++;state.deduplication.reclaimedBytes+=item.size;state.deduplication.pending=state.deduplication.pending.filter(x=>x!==item);
       }catch(e){if(e.name==='Paused')throw e;errors.push({path:item.from,error:e.message});}
